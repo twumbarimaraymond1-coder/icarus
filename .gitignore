@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Data files — don't accidentally commit large experimental datasets
+*.mat
+*.h5
+*.hdf5
+*.npy
+*.npz
+
+# Outputs
+*.png
+*.pdf
+
+# OS
+.DS_Store
+Thumbs.db

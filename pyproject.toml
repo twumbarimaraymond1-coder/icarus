@@ -1,0 +1,50 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "icarus-thermal"
+version = "0.1.0"
+description = "Icarus: data-driven heat flux prediction from infrared thermography using POD, DMD, and machine learning"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Raymond Twum-Barima" }]
+keywords = ["heat transfer", "boiling", "POD", "DMD", "machine learning", "infrared thermography"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+requires-python = ">=3.9"
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "scikit-learn>=1.3",
+    "optuna>=3.3",
+    "matplotlib>=3.7",
+    "h5py>=3.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4", "pytest-cov", "ruff", "mypy"]
+docs = ["sphinx", "sphinx-rtd-theme", "nbsphinx"]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/icarus"
+Documentation = "https://icarus.readthedocs.io"
+Issues = "https://github.com/yourusername/icarus/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["icarus*"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py39"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
