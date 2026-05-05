@@ -159,13 +159,12 @@ class POD:
         r = n_modes or self.n_modes_retained_
         r = min(r, self.n_modes_retained_)
 
-        contribs = np.zeros((self._n_pix, self._nt, r))
+        # Project X_c onto fitted basis — handles nt_in != nt_fit
+        nt_in = X_c.shape[1]
+        A_in = (self.modes_[:, :r].T @ X_c) * self.singular_values_[:r, None]
+        contribs = np.zeros((self._n_pix, nt_in, r))
         for i in range(r):
-            # outer product: φ_i (n_pix,) ⊗ a_i (nt,)
-            contribs[:, :, i] = np.outer(
-                self.modes_[:, i],
-                self.temporal_coefficients_[i, :],
-            )
+            contribs[:, :, i] = np.outer(self.modes_[:, i], A_in[i, :])
         return contribs
 
     def reconstruct(self, n_modes: Optional[int] = None) -> np.ndarray:
