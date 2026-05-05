@@ -34,9 +34,9 @@ dev = ["pytest>=7.4", "pytest-cov", "ruff", "mypy"]
 docs = ["sphinx", "sphinx-rtd-theme", "nbsphinx"]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/icarus"
+Homepage = "https://github.com/twumbarimaraymond1-coder/icarus"
 Documentation = "https://icarus.readthedocs.io"
-Issues = "https://github.com/yourusername/icarus/issues"
+Issues = "https://github.com/twumbarimaraymond1-coder/icarus/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

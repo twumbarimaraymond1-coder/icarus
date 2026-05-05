@@ -10,7 +10,7 @@ real-world validation results.
 ## Getting started
 
 ```bash
-git clone https://github.com/yourusername/icarus
+git clone https://github.com/twumbarimaraymond1-coder/icarus
 cd icarus
 pip install -e ".[dev]"
 ```
