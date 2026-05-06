@@ -161,7 +161,8 @@ class POD:
 
         # Project X_c onto fitted basis — handles nt_in != nt_fit
         nt_in = X_c.shape[1]
-        A_in = (self.modes_[:, :r].T @ X_c) * self.singular_values_[:r, None]
+        # U^T @ X_c gives Σ V^T directly — no further σ scaling needed
+        A_in = self.modes_[:, :r].T @ X_c
         contribs = np.zeros((self._n_pix, nt_in, r))
         for i in range(r):
             contribs[:, :, i] = np.outer(self.modes_[:, i], A_in[i, :])
@@ -200,8 +201,8 @@ class POD:
             Temporal coefficients on the new data.
         """
         self._require_fit()
-        # A_new = Σ^{-1} U^T X_c_new  (using pseudo-projection)
-        return (self.modes_.T @ X_c_new) * self.singular_values_[:, None]
+        # U^T @ X_c_new gives projected temporal coefficients
+        return self.modes_.T @ X_c_new
 
     def modes_needed_for_energy(self, threshold: float) -> int:
         """Return the number of modes needed to capture a given energy fraction.

@@ -1,5 +1,10 @@
 # icarus
 
+![CI](https://github.com/twumbarimaraymond1-coder/icarus/actions/workflows/ci.yml/badge.svg)
+![Python](https://img.shields.io/badge/python-3.9%20%7C%203.10%20%7C%203.11-blue)
+![License](https://img.shields.io/badge/license-MIT-green)
+![PyPI](https://img.shields.io/badge/PyPI-icarus--thermal-orange)
+
 **Data-driven heat flux prediction from infrared thermography.**
 
 `icarus` provides a full pipeline from raw IR camera data to trained
@@ -19,7 +24,9 @@ on a 17M-sample flow boiling dataset — a 69 % improvement over the linear base
 ## Installation
 
 ```bash
-pip install icarus
+pip install icarus-thermal
+
+> **Note:** `icarus` on PyPI is an unrelated astrophysics package. Install as `icarus-thermal`.
 ```
 
 Or from source:
@@ -191,3 +198,26 @@ pre-trained models, and improved DMD variants. See `CONTRIBUTING.md`.
 ## Licence
 
 MIT
+
+---
+
+## Research background
+
+Icarus implements the methodology from:
+
+> Twum-Barima, R. (2025). *Investigating the efficacy of data-driven techniques 
+> and machine learning algorithms to predict heat transfer characteristics.*
+> Individual Project Report, Loughborough University.
+
+The best-performing approach (Model C: POD modal mapping) achieved **R² = 0.729** 
+on 17,384,000 pixel-time samples from a flow boiling infrared thermography dataset,
+representing a 69% improvement over the linear temperature baseline.
+
+The key finding motivating Model C is that temperature and heat flux POD temporal 
+coefficients are highly correlated (r ≥ 0.96 for dominant modes), providing physical 
+justification for learning a reduced-order mapping between the two fields.
+
+## Data
+
+This repository contains no experimental data. The library operates on data you 
+supply. See [DATA.md](DATA.md) for contribution guidelines and the dataset registry.

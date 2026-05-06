@@ -288,9 +288,24 @@ class Pipeline:
         return q_pred.reshape(ny, nx, nt)
 
     def _reconstruct_from_modal_preds(self, y_modal, split):
-        # Placeholder — returns flattened scalar predictions for scalar metrics
-        # Full implementation handles the POD reconstruction path
-        return y_modal.reshape(-1) if y_modal.ndim > 1 else y_modal
+        """Reconstruct scalar heat flux from predicted modal contributions.
+        
+        y_modal shape: [n_pix*nt, n_modes] — predicted modal contributions
+        Returns: [n_pix*nt] — reconstructed heat flux (mean added back)
+        """
+        T = self._processed["T"]
+        ny, nx, nt = T.shape
+        nt_train = int(nt * self.train_fraction)
+        nt_split = nt_train if split == "train" else (nt - nt_train)
+
+        # Sum modal contributions across modes → q_c field
+        q_c_pred = y_modal.sum(axis=1)                          # [n_pix*nt_split]
+        q_c_pred = q_c_pred.reshape(ny * nx, nt_split)          # [n_pix, nt_split]
+
+        # Add mean back
+        q_mean_vec = self.preprocessor_.q_mean.reshape(-1)
+        q_pred = (q_c_pred + q_mean_vec[:, None]).reshape(-1)
+        return q_pred
 
     def _require_fit(self) -> None:
         if not self._fitted:
