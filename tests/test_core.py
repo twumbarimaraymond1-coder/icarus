@@ -192,11 +192,25 @@ class TestFeatures:
         X = build_raw_features(T)
         y = flatten_target(synthetic_data["q"])
         ny, nx, nt = T.shape
+        nt_train = int(0.7 * nt)
         X_tr, X_te, y_tr, y_te = train_test_split_temporal(
             X, y, train_fraction=0.7, n_pix=ny * nx, nt=nt
         )
-        assert len(X_tr) == int(0.7 * nt) * ny * nx
-        assert len(X_te) == (nt - int(0.7 * nt)) * ny * nx
+        assert len(X_tr) == nt_train * ny * nx
+        assert len(X_te) == (nt - nt_train) * ny * nx
+
+    def test_time_major_ordering(self, synthetic_data):
+        """Verify flatten_target produces time-major order."""
+        T = synthetic_data["T"]
+        q = synthetic_data["q"]
+        ny, nx, nt = T.shape
+        q_flat = flatten_target(q)
+        # First ny*nx samples should all be from timestep 0 (cast to float32 for comparison)
+        q_t0 = q[:, :, 0].reshape(-1).astype(np.float32)
+        np.testing.assert_array_almost_equal(q_flat[:ny * nx], q_t0, decimal=3)
+        # Second ny*nx samples should all be from timestep 1
+        q_t1 = q[:, :, 1].reshape(-1).astype(np.float32)
+        np.testing.assert_array_almost_equal(q_flat[ny * nx: 2 * ny * nx], q_t1, decimal=3)
 
 
 # ── Model tests ───────────────────────────────────────────────────────────────

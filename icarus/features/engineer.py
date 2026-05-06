@@ -51,10 +51,10 @@ def build_gradient_features(
     n = ny * nx * nt
 
     features = np.column_stack([
-        T.reshape(n),
-        dTdt.reshape(n),
-        dTdx.reshape(n),
-        dTdy.reshape(n),
+        T.transpose(2, 0, 1).reshape(n),
+        dTdt.transpose(2, 0, 1).reshape(n),
+        dTdx.transpose(2, 0, 1).reshape(n),
+        dTdy.transpose(2, 0, 1).reshape(n),
     ])
     return features.astype(np.float32)
 
@@ -92,10 +92,10 @@ def build_modal_features(
     """
     n_pix, nt, n_modes = T_contribs.shape
 
-    X = T_contribs.reshape(n_pix * nt, n_modes).astype(np.float32)
+    X = T_contribs.transpose(1, 0, 2).reshape(n_pix * nt, n_modes).astype(np.float32)
     y = None
     if q_contribs is not None:
-        y = q_contribs.reshape(n_pix * nt, n_modes).astype(np.float32)
+        y = q_contribs.transpose(1, 0, 2).reshape(n_pix * nt, n_modes).astype(np.float32)
 
     return X, y
 
@@ -111,7 +111,7 @@ def build_raw_features(T: np.ndarray) -> np.ndarray:
     -------
     np.ndarray, shape [ny*nx*nt, 1]
     """
-    return T.reshape(-1, 1).astype(np.float32)
+    return T.transpose(2, 0, 1).reshape(-1, 1).astype(np.float32)
 
 
 def flatten_target(q: np.ndarray) -> np.ndarray:
@@ -125,7 +125,7 @@ def flatten_target(q: np.ndarray) -> np.ndarray:
     -------
     np.ndarray, shape [ny*nx*nt]
     """
-    return q.reshape(-1).astype(np.float32)
+    return q.transpose(2, 0, 1).reshape(-1).astype(np.float32)
 
 
 def train_test_split_temporal(

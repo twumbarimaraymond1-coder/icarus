@@ -37,3 +37,6 @@ htmlcov/
 .DS_Store
 Thumbs.db
 *.egg-info/
+icarus_fixes.zip
+icarus_complete_pkg.zip
+icarus_direct.zip
