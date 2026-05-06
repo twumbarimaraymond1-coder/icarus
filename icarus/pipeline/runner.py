@@ -10,7 +10,7 @@ which gave the best results in the paper (R² = 0.729 on the test set).
 
 from __future__ import annotations
 
-from typing import Optional, Literal
+from typing import Optional, Literal, Union
 
 import numpy as np
 
@@ -77,6 +77,8 @@ class Pipeline:
         n_training_samples: Optional[int] = 1_000_000,
         optimise_hyperparams: bool = True,
         n_trials: int = 30,
+        n_opt_samples: int = 200_000,
+        hyperparam_search_space: Optional[Union[str, dict]] = None,
         random_state: int = 42,
     ):
         self.strategy = strategy
@@ -87,6 +89,8 @@ class Pipeline:
         self.n_training_samples = n_training_samples
         self.optimise_hyperparams = optimise_hyperparams
         self.n_trials = n_trials
+        self.n_opt_samples = n_opt_samples
+        self.hyperparam_search_space = hyperparam_search_space
         self.random_state = random_state
 
         # Components — populated during fit()
@@ -175,6 +179,8 @@ class Pipeline:
             self.model_.optimise(
                 X_train, y_train,
                 n_trials=self.n_trials,
+                n_opt_samples=self.n_opt_samples,
+                search_space=self.hyperparam_search_space,
                 verbose=verbose,
             )
 

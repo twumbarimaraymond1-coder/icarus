@@ -244,6 +244,52 @@ class TestHeatFluxNet:
             model.fit(np.zeros((10, 1)), np.zeros(10))
 
 
+# ── Search space tests ───────────────────────────────────────────────────────
+
+class TestSearchSpaces:
+    def test_presets_exist(self):
+        from icarus.models.neural import SEARCH_SPACES
+        for name in ("small", "medium", "large"):
+            assert name in SEARCH_SPACES
+            sp = SEARCH_SPACES[name]
+            for key in ("n_layers_min", "n_layers_max", "n_units_min",
+                        "n_units_max", "activations", "alpha_min", "alpha_max",
+                        "lr_min", "lr_max"):
+                assert key in sp, f"Missing key '{key}' in preset '{name}'"
+
+    def test_invalid_preset_raises(self, synthetic_data):
+        X = np.ones((100, 5), dtype=np.float32)
+        y = np.ones((100, 5), dtype=np.float32)
+        model = HeatFluxNet(strategy="modal", hidden_layer_sizes=(16,))
+        with pytest.raises(ValueError, match="Unknown search space preset"):
+            model.optimise(X, y, n_trials=1, search_space="nonexistent")
+
+    def test_custom_dict_accepted(self, synthetic_data):
+        """Custom dict search space runs without error."""
+        X = np.ones((200, 5), dtype=np.float32)
+        y = np.ones((200, 5), dtype=np.float32)
+        model = HeatFluxNet(strategy="modal")
+        custom = {
+            "n_layers_min": 1, "n_layers_max": 1,
+            "n_units_min": 8, "n_units_max": 16,
+            "activations": ["relu"],
+            "alpha_min": 1e-4, "alpha_max": 1e-3,
+            "lr_min": 1e-4, "lr_max": 1e-3,
+        }
+        model.optimise(X, y, n_trials=2, n_opt_samples=100,
+                       search_space=custom, verbose=False)
+        assert model.hidden_layer_sizes is not None
+
+    def test_string_preset_accepted(self, synthetic_data):
+        """String preset runs without error."""
+        X = np.ones((200, 5), dtype=np.float32)
+        y = np.ones((200, 5), dtype=np.float32)
+        model = HeatFluxNet(strategy="modal")
+        model.optimise(X, y, n_trials=2, n_opt_samples=100,
+                       search_space="small", verbose=False)
+        assert model.hidden_layer_sizes is not None
+
+
 # ── Metrics tests ─────────────────────────────────────────────────────────────
 
 class TestMetrics:

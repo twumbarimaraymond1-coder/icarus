@@ -36,7 +36,7 @@ from icarus.pipeline.runner import Pipeline
 from icarus.decomposition.pod import POD
 from icarus.decomposition.dmd import DMD
 from icarus.data.preprocessor import Preprocessor
-from icarus.models.neural import HeatFluxNet
+from icarus.models.neural import HeatFluxNet, SEARCH_SPACES
 from icarus.metrics.evaluation import evaluate
 
 __version__ = "0.1.0"
@@ -48,6 +48,7 @@ __all__ = [
     "DMD",
     "Preprocessor",
     "HeatFluxNet",
+    "SEARCH_SPACES",
     "evaluate",
     "__version__",
 ]

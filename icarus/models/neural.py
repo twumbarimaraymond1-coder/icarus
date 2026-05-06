@@ -13,7 +13,7 @@ Three model strategies from the paper are supported:
 
 from __future__ import annotations
 
-from typing import Optional, Literal
+from typing import Optional, Literal, Union
 import warnings
 
 import numpy as np
@@ -23,6 +23,31 @@ from sklearn.base import BaseEstimator, RegressorMixin
 
 
 Strategy = Literal["raw", "gradient", "modal"]
+
+SEARCH_SPACES: dict[str, dict] = {
+    "small": {
+        "n_layers_min": 1, "n_layers_max": 2,
+        "n_units_min": 16, "n_units_max": 128, "n_units_step": 16,
+        "activations": ["relu", "tanh"],
+        "alpha_min": 1e-5, "alpha_max": 1e-2,
+        "lr_min": 1e-4, "lr_max": 1e-2,
+    },
+    "medium": {
+        "n_layers_min": 1, "n_layers_max": 3,
+        "n_units_min": 16, "n_units_max": 256, "n_units_step": 16,
+        "activations": ["relu", "tanh"],
+        "alpha_min": 1e-5, "alpha_max": 1e-1,
+        "lr_min": 1e-4, "lr_max": 1e-2,
+    },
+    "large": {
+        "n_layers_min": 2, "n_layers_max": 5,
+        "n_units_min": 64, "n_units_max": 512, "n_units_step": 32,
+        "activations": ["relu", "tanh"],
+        "alpha_min": 1e-7, "alpha_max": 1e-1,
+        "lr_min": 1e-5, "lr_max": 5e-2,
+    },
+}
+_DEFAULT_SEARCH_SPACE = "medium"
 
 
 class HeatFluxNet(BaseEstimator, RegressorMixin):
@@ -89,7 +114,7 @@ class HeatFluxNet(BaseEstimator, RegressorMixin):
         y: np.ndarray,
         n_trials: int = 30,
         n_opt_samples: int = 200_000,
-        search_space: Optional[dict] = None,
+        search_space: Optional[Union[str, dict]] = None,
         verbose: bool = True,
     ) -> dict:
         """Run Bayesian hyperparameter optimisation with Optuna.
@@ -124,7 +149,17 @@ class HeatFluxNet(BaseEstimator, RegressorMixin):
         from sklearn.model_selection import train_test_split as sk_split
         from sklearn.metrics import r2_score
 
-        sp = search_space or {}
+        if search_space is None:
+            sp = SEARCH_SPACES[_DEFAULT_SEARCH_SPACE]
+        elif isinstance(search_space, str):
+            if search_space not in SEARCH_SPACES:
+                raise ValueError(
+                    f"Unknown search space preset '{search_space}'. "
+                    f"Choose from: {list(SEARCH_SPACES.keys())} or pass a dict."
+                )
+            sp = SEARCH_SPACES[search_space]
+        else:
+            sp = search_space
 
         # Subsample for speed
         n = min(n_opt_samples, len(X))
