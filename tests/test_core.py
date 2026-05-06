@@ -246,6 +246,41 @@ class TestHeatFluxNet:
 
 # ── Search space tests ───────────────────────────────────────────────────────
 
+class TestTimeMajorOrdering:
+    def test_flatten_target_is_time_major(self):
+        ny, nx, nt = 2, 3, 4
+        q = np.zeros((ny, nx, nt))
+        for t in range(nt):
+            q[:, :, t] = t  # each timestep has a known constant value
+        y = flatten_target(q)
+        assert np.all(y[:ny * nx] == 0),   "t=0 pixels should be first"
+        assert np.all(y[ny*nx:2*ny*nx] == 1), "t=1 pixels should be second"
+        assert np.all(y[2*ny*nx:3*ny*nx] == 2)
+        assert np.all(y[3*ny*nx:] == 3)
+
+    def test_modal_reconstruction_time_major(self):
+        n_pix, nt, n_modes = 6, 4, 3
+        y_modal = np.ones((n_pix * nt, n_modes), dtype=np.float32)
+        q_c_flat = y_modal.sum(axis=1)           # all 3.0
+        q_mean = np.arange(n_pix, dtype=np.float32)
+        q_pred = q_c_flat + np.tile(q_mean, nt)
+        assert q_pred.shape == (n_pix * nt,)
+        # Each block of n_pix should equal 3 + q_mean
+        for t in range(nt):
+            block = q_pred[t * n_pix:(t + 1) * n_pix]
+            np.testing.assert_array_equal(block, 3.0 + q_mean)
+
+    def test_build_raw_features_time_major(self):
+        ny, nx, nt = 2, 3, 4
+        T = np.zeros((ny, nx, nt))
+        for t in range(nt):
+            T[:, :, t] = t
+        X = build_raw_features(T)
+        n_pix = ny * nx
+        assert float(X[:n_pix].mean()) == 0.0
+        assert float(X[n_pix:2*n_pix].mean()) == 1.0
+
+
 class TestSearchSpaces:
     def test_presets_exist(self):
         from icarus.models.neural import SEARCH_SPACES

@@ -10,7 +10,7 @@ which gave the best results in the paper (R² = 0.729 on the test set).
 
 from __future__ import annotations
 
-from typing import Optional, Literal, Union
+from typing import Optional, Literal, Union, Union
 
 import numpy as np
 
@@ -79,6 +79,7 @@ class Pipeline:
         n_trials: int = 30,
         n_opt_samples: int = 200_000,
         hyperparam_search_space: Optional[Union[str, dict]] = None,
+        validation_strategy: str = "temporal",
         random_state: int = 42,
     ):
         self.strategy = strategy
@@ -91,6 +92,7 @@ class Pipeline:
         self.n_trials = n_trials
         self.n_opt_samples = n_opt_samples
         self.hyperparam_search_space = hyperparam_search_space
+        self.validation_strategy = validation_strategy
         self.random_state = random_state
 
         # Components — populated during fit()
@@ -181,6 +183,7 @@ class Pipeline:
                 n_trials=self.n_trials,
                 n_opt_samples=self.n_opt_samples,
                 search_space=self.hyperparam_search_space,
+                validation_strategy=self.validation_strategy,
                 verbose=verbose,
             )
 
@@ -305,13 +308,9 @@ class Pipeline:
         nt_split = nt_train if split == "train" else (nt - nt_train)
 
         # Sum modal contributions across modes → q_c field
-        q_c_pred = y_modal.sum(axis=1)                          # [n_pix*nt_split]
-        q_c_pred = q_c_pred.reshape(ny * nx, nt_split)          # [n_pix, nt_split]
-
-        # Add mean back
+        q_c_flat = y_modal.sum(axis=1)
         q_mean_vec = self.preprocessor_.q_mean.reshape(-1)
-        q_pred = (q_c_pred + q_mean_vec[:, None]).reshape(-1)
-        return q_pred
+        return q_c_flat + np.tile(q_mean_vec, nt_split)
 
     def _require_fit(self) -> None:
         if not self._fitted:

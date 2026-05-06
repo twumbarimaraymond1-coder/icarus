@@ -115,6 +115,7 @@ class HeatFluxNet(BaseEstimator, RegressorMixin):
         n_trials: int = 30,
         n_opt_samples: int = 200_000,
         search_space: Optional[Union[str, dict]] = None,
+        validation_strategy: str = "random",
         verbose: bool = True,
     ) -> dict:
         """Run Bayesian hyperparameter optimisation with Optuna.
@@ -167,9 +168,14 @@ class HeatFluxNet(BaseEstimator, RegressorMixin):
         idx = rng.choice(len(X), size=n, replace=False)
         X_opt, y_opt = X[idx], y[idx]
 
-        X_tr, X_val, y_tr, y_val = sk_split(
-            X_opt, y_opt, test_size=0.2, random_state=self.random_state
-        )
+        if validation_strategy == "temporal":
+            split_idx = int(len(X_opt) * 0.8)
+            X_tr, X_val = X_opt[:split_idx], X_opt[split_idx:]
+            y_tr, y_val = y_opt[:split_idx], y_opt[split_idx:]
+        else:
+            X_tr, X_val, y_tr, y_val = sk_split(
+                X_opt, y_opt, test_size=0.2, random_state=self.random_state
+            )
 
         # Scale inside objective to avoid leakage
         sx = StandardScaler().fit(X_tr)
