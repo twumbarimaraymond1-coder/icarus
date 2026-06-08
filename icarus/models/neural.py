@@ -108,6 +108,27 @@ class HeatFluxNet(BaseEstimator, RegressorMixin):
 
     # ── public API ────────────────────────────────────────────────────────────
 
+    @staticmethod
+    def _subsample_indices(
+        n_total: int,
+        n: int,
+        random_state: int,
+        validation_strategy: str,
+    ) -> np.ndarray:
+        """Pick ``n`` row indices out of ``n_total`` for trial evaluation.
+
+        For ``validation_strategy == "temporal"`` the selected indices are
+        returned in ascending (chronological) order so the downstream 80/20
+        head/tail split is a genuine past→future split. For any other strategy
+        the indices are returned in random order (the caller applies an i.i.d.
+        sklearn split, so order is irrelevant there).
+        """
+        rng = np.random.default_rng(random_state)
+        idx = rng.choice(n_total, size=n, replace=False)
+        if validation_strategy == "temporal":
+            idx = np.sort(idx)
+        return idx
+
     def optimise(
         self,
         X: np.ndarray,
@@ -164,8 +185,9 @@ class HeatFluxNet(BaseEstimator, RegressorMixin):
 
         # Subsample for speed
         n = min(n_opt_samples, len(X))
-        rng = np.random.default_rng(self.random_state)
-        idx = rng.choice(len(X), size=n, replace=False)
+        idx = self._subsample_indices(
+            len(X), n, self.random_state, validation_strategy
+        )
         X_opt, y_opt = X[idx], y[idx]
 
         if validation_strategy == "temporal":

@@ -87,12 +87,22 @@ def main(data_dir: Path, test_id: str, files: list[str], out_dir: Path):
         "trim_frames": TRIM_FRAMES, "z_layer": Z_LAYER,
         "train": {"r2": metrics["train"].r2, "rmse": metrics["train"].rmse,
                   "mae": metrics["train"].mae},
+        # "test" == fluctuation field (the scientifically meaningful metric)
         "test":  {"r2": metrics["test"].r2,  "rmse": metrics["test"].rmse,
                   "mae": metrics["test"].mae},
+        "test_metric": "fluctuation (mean-subtracted) field",
     }
+    if "test_absolute" in metrics:
+        m_abs = metrics["test_absolute"]
+        report["test_absolute"] = {"r2": m_abs.r2, "rmse": m_abs.rmse,
+                                   "mae": m_abs.mae}
     (out_dir / f"{tag}.json").write_text(json.dumps(report, indent=2))
-    print(f"\nHeld-out {test_id}:  R2={metrics['test'].r2:.4f}  "
+    print(f"\nHeld-out {test_id} (fluctuation field):  R2={metrics['test'].r2:.4f}  "
           f"RMSE={metrics['test'].rmse:,.0f} W/m2")
+    if "test_absolute" in metrics:
+        print(f"Held-out {test_id} (absolute field):     "
+              f"R2={metrics['test_absolute'].r2:.4f}  "
+              f"RMSE={metrics['test_absolute'].rmse:,.0f} W/m2")
     print(f"Report -> {out_dir / (tag + '.json')}")
 
 

@@ -10,7 +10,7 @@ which gave the best results in the paper (R² = 0.729 on the test set).
 
 from __future__ import annotations
 
-from typing import Optional, Literal, Union, Union
+from typing import Optional, Literal, Union
 
 import numpy as np
 
@@ -24,7 +24,7 @@ from icarus.features.engineer import (
     train_test_split_temporal,
 )
 from icarus.models.neural import HeatFluxNet
-from icarus.metrics.evaluation import evaluate, evaluate_timeresolved, Metrics
+from icarus.metrics.evaluation import evaluate, Metrics
 
 
 Strategy = Literal["raw", "gradient", "modal"]

@@ -137,6 +137,8 @@ class POD:
         self,
         X_c: np.ndarray,
         n_modes: Optional[int] = None,
+        chunk_size: Optional[int] = None,
+        dtype: Optional[np.dtype] = None,
     ) -> np.ndarray:
         """Compute rank-1 modal contribution fields.
 
@@ -149,6 +151,17 @@ class POD:
             Mean-centred snapshot matrix.
         n_modes : int, optional
             Override the number of modes to compute contributions for.
+        chunk_size : int, optional
+            If given, fill the output in blocks of ``chunk_size`` timesteps
+            instead of one full-width ``np.outer`` per mode. This bounds the
+            transient memory to ``n_pix * chunk_size`` floats, which matters for
+            real datasets (millions of pixel-timesteps) where the full
+            ``[n_pix, nt]`` outer-product temporary is large. The returned array
+            is bit-for-bit identical to the unchunked path.
+        dtype : numpy dtype, optional
+            Output dtype. Defaults to float64. Pass ``np.float32`` to halve the
+            size of the (often largest) returned array when downstream code only
+            needs single precision.
 
         Returns
         -------
@@ -163,9 +176,19 @@ class POD:
         nt_in = X_c.shape[1]
         # U^T @ X_c gives Σ V^T directly — no further σ scaling needed
         A_in = self.modes_[:, :r].T @ X_c
-        contribs = np.zeros((self._n_pix, nt_in, r))
+        out_dtype = dtype if dtype is not None else np.float64
+        contribs = np.zeros((self._n_pix, nt_in, r), dtype=out_dtype)
+
+        step = nt_in if not chunk_size else max(1, int(chunk_size))
         for i in range(r):
-            contribs[:, :, i] = np.outer(self.modes_[:, i], A_in[i, :])
+            phi_i = self.modes_[:, i]                  # [n_pix]
+            a_i = A_in[i, :]                           # [nt_in]
+            for t0 in range(0, nt_in, step):
+                t1 = min(t0 + step, nt_in)
+                # transient bounded to [n_pix, step] regardless of nt_in
+                contribs[:, t0:t1, i] = np.outer(
+                    phi_i, a_i[t0:t1]
+                ).astype(out_dtype, copy=False)
         return contribs
 
     def reconstruct(self, n_modes: Optional[int] = None) -> np.ndarray:

@@ -6,11 +6,10 @@ Publication-quality plotting utilities for thermography and POD/DMD results.
 
 from __future__ import annotations
 
-from typing import Optional, Sequence
+from typing import Optional
 
 import numpy as np
 import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
 from matplotlib.figure import Figure
 
 

@@ -35,7 +35,7 @@ docs = ["sphinx", "sphinx-rtd-theme", "nbsphinx"]
 
 [project.urls]
 Homepage = "https://github.com/twumbarimaraymond1-coder/icarus"
-Documentation = "https://icarus.readthedocs.io"
+Documentation = "https://github.com/twumbarimaraymond1-coder/icarus#readme"
 Issues = "https://github.com/twumbarimaraymond1-coder/icarus/issues"
 
 [tool.setuptools.packages.find]
@@ -45,6 +45,11 @@ include = ["icarus*"]
 [tool.ruff]
 line-length = 88
 target-version = "py39"
+
+[tool.ruff.lint.per-file-ignores]
+# Package __init__ files intentionally re-export submodule symbols via star
+# imports; F403/F405 are expected and acceptable there.
+"__init__.py" = ["F403", "F405"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

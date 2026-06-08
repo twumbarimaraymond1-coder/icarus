@@ -54,6 +54,56 @@ class TestLoader:
             from_arrays(T, q)
 
 
+class TestHDF5Loader:
+    """Guards the MATLAB v7.3 / HDF5 load path (icarus.data.loader._load_hdf5):
+    MATLAB stores arrays with reversed axis order, and 4-D temperature must be
+    de-transposed and have its heater-surface z-layer (index 0) extracted.
+    This is the exact path the real MODEL_~1/2/3.MAT files take."""
+
+    def _write_v73_like(self, path, T_logical, q_logical, dt):
+        # MATLAB v7.3 (HDF5) stores an [ny,nx,nz,nt] array as [nt,nz,nx,ny].
+        import h5py
+        with h5py.File(path, "w") as f:
+            f.create_dataset("T", data=np.asarray(T_logical).transpose(
+                tuple(range(T_logical.ndim))[::-1]))
+            f.create_dataset("qL2", data=np.asarray(q_logical).transpose(
+                tuple(range(q_logical.ndim))[::-1]))
+            f.create_dataset("TimeStep", data=np.array([[dt]]))
+
+    def test_hdf5_4d_temperature_z_layer0(self, tmp_path):
+        from icarus.data.loader import load
+        ny, nx, nz, nt = 4, 5, 11, 7
+        rng = np.random.default_rng(0)
+        T = rng.standard_normal((ny, nx, nz, nt))
+        q = rng.standard_normal((ny, nx, nt))
+        p = tmp_path / "model.h5"
+        self._write_v73_like(p, T, q, dt=2.5e-4)
+
+        data = load(str(p), temperature_key="T", heatflux_key="qL2",
+                    timestep_key="TimeStep")
+        assert data["T"].shape == (ny, nx, nt)
+        assert data["q"].shape == (ny, nx, nt)
+        # z-layer 0 (heater surface) must be the one extracted
+        np.testing.assert_allclose(data["T"], T[:, :, 0, :])
+        np.testing.assert_allclose(data["q"], q)
+        assert abs(data["dt"] - 2.5e-4) < 1e-12
+
+    def test_mat_suffix_falls_back_to_hdf5(self, tmp_path):
+        # A v7.3 .mat is really HDF5; scipy.io.loadmat fails and the loader
+        # must transparently fall back to the HDF5 reader.
+        from icarus.data.loader import load
+        ny, nx, nz, nt = 3, 4, 11, 6
+        rng = np.random.default_rng(1)
+        T = rng.standard_normal((ny, nx, nz, nt))
+        q = rng.standard_normal((ny, nx, nt))
+        p = tmp_path / "MODEL_~1.MAT"
+        self._write_v73_like(p, T, q, dt=1e-3)
+
+        data = load(str(p))
+        assert data["T"].shape == (ny, nx, nt)
+        np.testing.assert_allclose(data["T"], T[:, :, 0, :])
+
+
 # ── Preprocessor tests ────────────────────────────────────────────────────────
 
 class TestPreprocessor:
@@ -129,6 +179,28 @@ class TestPOD:
         contribs = pod.modal_contributions(X_c)
         assert contribs.shape == (n_pix, nt, 3)
 
+    def test_modal_contributions_chunked_matches_unchunked(self, synthetic_data):
+        """Chunked computation must be bit-for-bit identical to the full-width
+        path (memory optimisation must not change results)."""
+        pre = Preprocessor()
+        out = pre.fit_transform(synthetic_data)
+        X_c = Preprocessor.to_matrix(out["T_c"])
+        pod = POD(n_modes=3).fit(X_c)
+        full = pod.modal_contributions(X_c)
+        for cs in (1, 7, 1000):
+            chunked = pod.modal_contributions(X_c, chunk_size=cs)
+            np.testing.assert_array_equal(full, chunked)
+
+    def test_modal_contributions_dtype(self, synthetic_data):
+        pre = Preprocessor()
+        out = pre.fit_transform(synthetic_data)
+        X_c = Preprocessor.to_matrix(out["T_c"])
+        pod = POD(n_modes=3).fit(X_c)
+        c32 = pod.modal_contributions(X_c, dtype=np.float32)
+        assert c32.dtype == np.float32
+        np.testing.assert_allclose(
+            c32, pod.modal_contributions(X_c), rtol=1e-4, atol=1e-3)
+
     def test_fit_before_use_raises(self):
         pod = POD(n_modes=5)
         with pytest.raises(RuntimeError):
@@ -175,7 +247,7 @@ class TestFeatures:
     def test_modal_features_shape(self, synthetic_data):
         pre = Preprocessor()
         out = pre.fit_transform(synthetic_data)
-        T, q = out["T"], out["q"]
+        T = out["T"]
         ny, nx, nt = T.shape
         X_c_T = Preprocessor.to_matrix(out["T_c"])
         X_c_q = Preprocessor.to_matrix(out["q_c"])
@@ -242,6 +314,46 @@ class TestHeatFluxNet:
         model = HeatFluxNet()
         with pytest.raises(RuntimeError, match="hidden_layer_sizes"):
             model.fit(np.zeros((10, 1)), np.zeros(10))
+
+
+class TestTemporalSubsample:
+    """Guards the temporal-validation subsample fix.
+
+    Before the fix, ``optimise`` drew a random subsample and *then* did an
+    80/20 head/tail split for ``validation_strategy="temporal"``. Because the
+    random draw destroyed chronological order, the "temporal" validation set
+    interleaved with training timesteps — silently leaking the future into the
+    past. The fix sorts the subsampled indices when temporal.
+    """
+
+    def test_temporal_indices_are_sorted(self):
+        idx = HeatFluxNet._subsample_indices(
+            n_total=10_000, n=500, random_state=0,
+            validation_strategy="temporal",
+        )
+        assert np.all(np.diff(idx) > 0), \
+            "temporal subsample indices must be ascending (chronological)"
+
+    def test_temporal_val_rows_are_strictly_later(self):
+        # The head/tail split the optimiser performs must put every validation
+        # row at a later original timestep than every training row.
+        idx = HeatFluxNet._subsample_indices(
+            n_total=10_000, n=500, random_state=0,
+            validation_strategy="temporal",
+        )
+        split = int(len(idx) * 0.8)
+        train_idx, val_idx = idx[:split], idx[split:]
+        assert train_idx.max() < val_idx.min(), \
+            "no temporal leakage: all val rows after all train rows"
+
+    def test_random_strategy_not_sorted(self):
+        # Random strategy must NOT force chronological order (it uses an i.i.d.
+        # sklearn split downstream); sorting would be a needless behaviour change.
+        idx = HeatFluxNet._subsample_indices(
+            n_total=10_000, n=500, random_state=0,
+            validation_strategy="random",
+        )
+        assert not np.all(np.diff(idx) > 0)
 
 
 # ── Search space tests ───────────────────────────────────────────────────────
@@ -425,3 +537,42 @@ class TestCrossDatasetFit:
                                       optimise_hyperparams=False)
         with pytest.raises(ValueError):
             trainer.cross_dataset_fit(train_ids=[], test_id="D003", verbose=False)
+
+    def test_q_abs_is_pixel_major_aligned(self, registry_with_three):
+        """The extractor must store q_abs in PIXEL-major order, row-aligned
+        with q_contribs (row = pixel*nt + t). Guards the absolute-R² fix:
+        reshaping q_abs to [n_pix, nt] and meaning over time must equal the
+        separately stored per-pixel mean field."""
+        import h5py
+        reg = registry_with_three
+        path = reg.get("D003").processed_path
+        with h5py.File(path, "r") as f:
+            assert "q_abs" in f, "extractor must emit q_abs"
+            assert "q_mean_field" in f, "extractor must emit q_mean_field"
+            q_abs = f["q_abs"][:]
+            q_mean_field = f["q_mean_field"][:]
+            nt = int(f.attrs["nt"])
+            n_pix = len(q_mean_field)
+        assert len(q_abs) == n_pix * nt
+        per_pixel_mean = q_abs.reshape(n_pix, nt).mean(axis=1)
+        np.testing.assert_allclose(per_pixel_mean, q_mean_field, rtol=1e-4)
+
+    def test_absolute_and_fluctuation_metrics_reported(self, registry_with_three):
+        """evaluate() must report both a fluctuation metric (the meaningful
+        one, under 'test') and an absolute-field metric (under 'test_absolute').
+        Absolute R² is >= fluctuation R² because the spatial mean inflates the
+        denominator variance."""
+        from icarus.registry.trainer import MultiDatasetTrainer
+
+        trainer = MultiDatasetTrainer(registry_with_three, n_pod_modes=3,
+                                      n_training_samples=None,
+                                      optimise_hyperparams=False)
+        trainer.model_ = HeatFluxNet(strategy="modal",
+                                     hidden_layer_sizes=(16,), max_iter=20)
+        trainer.cross_dataset_fit(train_ids=["D001", "D002"], test_id="D003",
+                                  verbose=False)
+        metrics = trainer.evaluate(verbose=False)
+        assert "test_fluctuation" in metrics
+        assert "test_absolute" in metrics
+        assert metrics["test"] is metrics["test_fluctuation"]
+        assert metrics["test_absolute"].r2 >= metrics["test_fluctuation"].r2 - 1e-9

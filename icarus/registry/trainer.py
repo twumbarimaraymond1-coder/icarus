@@ -29,8 +29,6 @@ from typing import Optional
 
 import numpy as np
 import h5py
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import r2_score
 
 from icarus.models.neural import HeatFluxNet
 from icarus.metrics.evaluation import evaluate
@@ -89,6 +87,7 @@ class MultiDatasetTrainer:
         self._y_test: Optional[np.ndarray] = None
         self._dataset_ids_used: list[str] = []
         self._test_dataset_id: Optional[str] = None
+        self._q_abs_test: Optional[np.ndarray] = None
         self._fitted = False
 
     # ── public API ────────────────────────────────────────────────────────────
@@ -283,6 +282,10 @@ class MultiDatasetTrainer:
         X_test, y_test = self._load_all_features(
             test_entry.processed_path, verbose=verbose
         )
+        # Absolute (un-centred) ground-truth heat flux for the held-out set,
+        # row-aligned with X_test/y_test. Used for absolute-field R² in
+        # evaluate(). None if the features file predates this field.
+        self._q_abs_test = self._load_q_abs(test_entry.processed_path)
 
         if verbose:
             print(f"[trainer] Training samples : {len(X_train):,}")
@@ -333,9 +336,24 @@ class MultiDatasetTrainer:
     def evaluate(self, verbose: bool = True) -> dict:
         """Evaluate train and test performance.
 
+        Two flavours of metric are reported for the test set:
+
+        * **fluctuation** R²/RMSE — computed on the mean-subtracted (centred)
+          heat-flux field that the POD modal model actually predicts. This is
+          the scientifically meaningful number: it measures how well the
+          temperature→heat-flux *modal coupling* transfers. The returned
+          ``"test"`` key is this fluctuation metric (also under
+          ``"test_fluctuation"``).
+        * **absolute** R²/RMSE — computed on the full un-centred field
+          (per-pixel mean added back). Always looks more favourable because the
+          spatial mean dominates the variance; reported under
+          ``"test_absolute"`` for transparency. Only present when the features
+          file carries the ``q_abs`` array (re-extract older datasets to get it).
+
         Returns
         -------
-        dict with per-dataset and combined metrics.
+        dict with keys ``"train"``, ``"test"``, ``"test_fluctuation"`` and,
+        when available, ``"test_absolute"``.
         """
         self._require_fit()
 
@@ -353,14 +371,31 @@ class MultiDatasetTrainer:
             split="test",
         )
 
+        result = {"train": m_train, "test": m_test, "test_fluctuation": m_test}
+
+        # Absolute-field R²: add the per-pixel mean back to both sides. The
+        # offset (q_abs - centred truth) cancels in the residual, so the model
+        # is scored on its modal error against the full-field variance — a fair
+        # absolute metric that does not penalise POD truncation.
+        m_test_abs = None
+        if (self._q_abs_test is not None
+                and len(self._q_abs_test) == len(self._y_test)):
+            true_centred = self._y_test.sum(axis=1)
+            offset = self._q_abs_test - true_centred
+            pred_abs = y_test_pred.sum(axis=1) + offset
+            m_test_abs = evaluate(self._q_abs_test, pred_abs, split="test")
+            result["test_absolute"] = m_test_abs
+
         if verbose:
             print(f"\nTrain datasets: {self._dataset_ids_used}")
             if self._test_dataset_id is not None:
                 print(f"Held-out test dataset: {self._test_dataset_id}")
             print(m_train)
-            print(m_test)
+            print(f"[test · fluctuation field] {m_test}")
+            if m_test_abs is not None:
+                print(f"[test · absolute field]    {m_test_abs}")
 
-        return {"train": m_train, "test": m_test}
+        return result
 
     def save_model(self, path: str | Path) -> None:
         """Save the trained model to disk.
@@ -448,6 +483,21 @@ class MultiDatasetTrainer:
             print(f"  {ds_id}: {n_samples:,} samples loaded (all)")
 
         return X, y
+
+    def _load_q_abs(
+        self,
+        features_path: str,
+    ) -> Optional[np.ndarray]:
+        """Load the absolute (un-centred) heat-flux target if present.
+
+        Stored pixel-major by the extractor so it is row-aligned with
+        ``q_contribs``/``T_contribs``. Returns None for older feature files
+        that do not contain ``q_abs`` (absolute R² is then skipped gracefully).
+        """
+        with h5py.File(features_path, "r") as f:
+            if "q_abs" not in f:
+                return None
+            return f["q_abs"][:]
 
     def _require_fit(self) -> None:
         if not self._fitted:

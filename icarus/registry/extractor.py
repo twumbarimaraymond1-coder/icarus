@@ -8,7 +8,10 @@ Each processed dataset produces a ``features.h5`` file containing:
 
     /T_contribs     [n_samples, n_modes]  temperature modal contributions
     /q_contribs     [n_samples, n_modes]  heat flux modal contributions
-    /q_flat         [n_samples]           raw heat flux (for reconstruction loss)
+    /q_flat         [n_samples]           raw heat flux, TIME-major (legacy)
+    /q_abs          [n_samples]           absolute heat flux, PIXEL-major,
+                                          row-aligned with q_contribs
+    /q_mean_field   [n_pix]               per-pixel time-mean heat flux
     /split          [n_samples]           0=train, 1=test (integer mask)
     /metadata       (HDF5 attributes)     fluid, setup, n_modes, etc.
 
@@ -19,17 +22,15 @@ reused for inference on new data without re-fitting.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
-import json
 
 import numpy as np
 import h5py
 
-from icarus.data.loader import load, from_arrays
+from icarus.data.loader import load
 from icarus.data.preprocessor import Preprocessor, PreprocessorConfig
 from icarus.decomposition.pod import POD
-from icarus.features.engineer import build_modal_features, flatten_target
-from icarus.registry.dataset import DatasetRegistry, DatasetEntry
+from icarus.features.engineer import flatten_target
+from icarus.registry.dataset import DatasetRegistry
 
 
 class FeatureExtractor:
@@ -135,13 +136,27 @@ class FeatureExtractor:
 
         # ── 4. Modal contributions ───────────────────────────────────────────
         print("  Computing modal contributions...")
-        T_contribs = pod_T.modal_contributions(X_c_T)  # [n_pix, nt, modes]
-        q_contribs = pod_q.modal_contributions(X_c_q)
+        # Chunk over time + emit float32 to bound peak memory on large real
+        # datasets (millions of pixel-timesteps). Downstream casts to float32
+        # anyway, so single precision here is lossless for the pipeline.
+        T_contribs = pod_T.modal_contributions(
+            X_c_T, chunk_size=512, dtype=np.float32)  # [n_pix, nt, modes]
+        q_contribs = pod_q.modal_contributions(
+            X_c_q, chunk_size=512, dtype=np.float32)
 
         # Reshape to [n_samples, n_modes]
         X_feat = T_contribs.reshape(n_pix * nt, self.n_pod_modes).astype(np.float32)
         y_feat = q_contribs.reshape(n_pix * nt, self.n_pod_modes).astype(np.float32)
-        q_flat = flatten_target(q)                      # [n_pix * nt]
+        q_flat = flatten_target(q)                      # [n_pix * nt], time-major
+
+        # Absolute (un-centred) heat flux + per-pixel mean field, both stored in
+        # PIXEL-major order so they are row-aligned with q_contribs/T_contribs
+        # (whose reshape above is pixel-major: row = pixel*nt + t). These let the
+        # trainer report a true absolute-field R² alongside the fluctuation R².
+        # NB: q_flat above is time-major and is NOT row-aligned with q_contribs —
+        # kept only for backward compatibility; use q_abs for alignment.
+        q_abs = q.reshape(n_pix * nt).astype(np.float32)        # [n_pix*nt], pixel-major
+        q_mean_field = q.mean(axis=2).reshape(n_pix).astype(np.float32)  # [n_pix]
 
         # Train/test mask (0=train, 1=test)
         split_mask = np.ones(n_pix * nt, dtype=np.int8)
@@ -155,6 +170,10 @@ class FeatureExtractor:
             f.create_dataset("q_contribs", data=y_feat,
                              compression="gzip", compression_opts=4)
             f.create_dataset("q_flat", data=q_flat,
+                             compression="gzip", compression_opts=4)
+            f.create_dataset("q_abs", data=q_abs,
+                             compression="gzip", compression_opts=4)
+            f.create_dataset("q_mean_field", data=q_mean_field,
                              compression="gzip", compression_opts=4)
             f.create_dataset("split", data=split_mask)
 
