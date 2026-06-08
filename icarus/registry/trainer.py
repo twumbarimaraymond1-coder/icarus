@@ -88,6 +88,7 @@ class MultiDatasetTrainer:
         self._y_train: Optional[np.ndarray] = None
         self._y_test: Optional[np.ndarray] = None
         self._dataset_ids_used: list[str] = []
+        self._test_dataset_id: Optional[str] = None
         self._fitted = False
 
     # ── public API ────────────────────────────────────────────────────────────
@@ -205,6 +206,130 @@ class MultiDatasetTrainer:
         self._fitted = True
         return self
 
+    def cross_dataset_fit(
+        self,
+        train_ids: list[str],
+        test_id: str,
+        verbose: bool = True,
+    ) -> "MultiDatasetTrainer":
+        """Train on two (or more) datasets and evaluate on a held-out third.
+
+        Unlike ``fit()``, which uses each dataset's own internal train/test
+        split, this method uses *all* samples from ``train_ids`` for training
+        and *all* samples from ``test_id`` for testing. The result is a
+        stricter cross-dataset generalisation evaluation: the model never sees
+        any data from the test dataset during training. This is the right
+        protocol for answering "does the model generalise to an unseen heater
+        surface / fluid?" rather than merely to unseen timesteps.
+
+        Parameters
+        ----------
+        train_ids : list[str]
+            Dataset IDs whose complete data is used for training
+            (e.g. ``["D001", "D002"]``).
+        test_id : str
+            Dataset ID held out entirely for evaluation (e.g. ``"D003"``).
+        verbose : bool
+
+        Returns
+        -------
+        self
+
+        Examples
+        --------
+        >>> trainer = MultiDatasetTrainer(registry, n_pod_modes=5)
+        >>> trainer.cross_dataset_fit(train_ids=["D001", "D002"], test_id="D003")
+        >>> trainer.evaluate()
+        """
+        if not train_ids:
+            raise ValueError("train_ids must contain at least one dataset ID.")
+        if test_id in train_ids:
+            raise ValueError(
+                f"test_id '{test_id}' must not appear in train_ids — "
+                "it would leak test data into training."
+            )
+
+        if verbose:
+            print("[trainer] Cross-dataset split:")
+            print(f"  Train : {train_ids}")
+            print(f"  Test  : {test_id}")
+
+        # ── Load ALL samples from training datasets ───────────────────────
+        X_train_parts, y_train_parts = [], []
+        for ds_id in train_ids:
+            entry = self.registry.get(ds_id)
+            if not entry.processed_path:
+                raise ValueError(
+                    f"Dataset '{ds_id}' has not been processed. "
+                    "Run FeatureExtractor.process() first."
+                )
+            X_all, y_all = self._load_all_features(
+                entry.processed_path, verbose=verbose
+            )
+            X_train_parts.append(X_all)
+            y_train_parts.append(y_all)
+            self._dataset_ids_used.append(ds_id)
+
+        X_train = np.concatenate(X_train_parts, axis=0)
+        y_train = np.concatenate(y_train_parts, axis=0)
+
+        # ── Load ALL samples from the held-out test dataset ───────────────
+        test_entry = self.registry.get(test_id)
+        if not test_entry.processed_path:
+            raise ValueError(
+                f"Test dataset '{test_id}' has not been processed. "
+                "Run FeatureExtractor.process() first."
+            )
+        X_test, y_test = self._load_all_features(
+            test_entry.processed_path, verbose=verbose
+        )
+
+        if verbose:
+            print(f"[trainer] Training samples : {len(X_train):,}")
+            print(f"[trainer] Test samples     : {len(X_test):,}  "
+                  f"(from {test_id})")
+
+        # Subsample training data if requested
+        if self.n_training_samples and len(X_train) > self.n_training_samples:
+            rng = np.random.default_rng(self.random_state)
+            idx = rng.choice(len(X_train), self.n_training_samples,
+                             replace=False)
+            X_train = X_train[idx]
+            y_train = y_train[idx]
+            if verbose:
+                print(f"[trainer] Subsampled to "
+                      f"{self.n_training_samples:,} training samples")
+
+        self._X_train = X_train
+        self._X_test = X_test
+        self._y_train = y_train
+        self._y_test = y_test
+        self._test_dataset_id = test_id
+
+        # ── Train model ───────────────────────────────────────────────────
+        if self.model_ is None:
+            self.model_ = HeatFluxNet(
+                strategy="modal",
+                random_state=self.random_state,
+            )
+
+        if self.optimise_hyperparams and self.model_.hidden_layer_sizes is None:
+            if verbose:
+                print(f"[trainer] Bayesian optimisation "
+                      f"({self.n_trials} trials)...")
+            self.model_.optimise(
+                X_train, y_train,
+                n_trials=self.n_trials,
+                verbose=verbose,
+            )
+
+        if verbose:
+            print("[trainer] Training final model...")
+        self.model_.fit(X_train, y_train, n_samples=self.n_training_samples)
+
+        self._fitted = True
+        return self
+
     def evaluate(self, verbose: bool = True) -> dict:
         """Evaluate train and test performance.
 
@@ -229,7 +354,9 @@ class MultiDatasetTrainer:
         )
 
         if verbose:
-            print(f"\nDatasets: {self._dataset_ids_used}")
+            print(f"\nTrain datasets: {self._dataset_ids_used}")
+            if self._test_dataset_id is not None:
+                print(f"Held-out test dataset: {self._test_dataset_id}")
             print(m_train)
             print(m_test)
 
@@ -294,6 +421,33 @@ class MultiDatasetTrainer:
             X[train_mask], X[test_mask],
             y[train_mask], y[test_mask],
         )
+
+    def _load_all_features(
+        self,
+        features_path: str,
+        verbose: bool = True,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Load *all* samples from a processed HDF5 file, ignoring the
+        internal train/test split mask.
+
+        Used by ``cross_dataset_fit`` so that entire datasets contribute
+        fully to either training or testing, never a sub-split of each.
+
+        Returns
+        -------
+        X : np.ndarray, shape [n_samples, n_modes]
+        y : np.ndarray, shape [n_samples, n_modes]
+        """
+        with h5py.File(features_path, "r") as f:
+            X = f["T_contribs"][:]     # [n_samples, n_modes]
+            y = f["q_contribs"][:]     # [n_samples, n_modes]
+            ds_id = f.attrs.get("dataset_id", "?")
+            n_samples = len(X)
+
+        if verbose:
+            print(f"  {ds_id}: {n_samples:,} samples loaded (all)")
+
+        return X, y
 
     def _require_fit(self) -> None:
         if not self._fitted:

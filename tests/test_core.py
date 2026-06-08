@@ -341,3 +341,87 @@ class TestMetrics:
         s = str(m)
         assert "test" in s
         assert "R²" in s
+
+
+# ── Cross-dataset training tests ────────────────────────────────────────────────
+
+class TestCrossDatasetFit:
+    """Guards MultiDatasetTrainer.cross_dataset_fit: train on N datasets,
+    hold out one entirely for testing (cross-surface generalisation)."""
+
+    def _make_npz(self, tmp_path, name, seed, q_mean):
+        rng = np.random.default_rng(seed)
+        ny, nx, nt = 16, 20, 60
+        XX, YY = np.meshgrid(np.linspace(0, 1, nx), np.linspace(0, 1, ny))
+        t = np.linspace(0, 1, nt)
+        m1 = np.sin(np.pi * YY) * np.cos(np.pi * XX)
+        T = (420.0 + m1[:, :, None] * 3 * np.sin(2 * np.pi * t)[None, None, :]
+             + 0.5 * rng.standard_normal((ny, nx, nt)))
+        q = q_mean - 12000 * (T - 420.0) + 8000 * rng.standard_normal((ny, nx, nt))
+        p = tmp_path / f"{name}.npz"
+        np.savez(p, T=T, qL2=q, TimeStep=2.5e-4)
+        return str(p)
+
+    @pytest.fixture
+    def registry_with_three(self, tmp_path):
+        from icarus.registry.dataset import DatasetRegistry, DatasetEntry
+        from icarus.registry.extractor import FeatureExtractor
+
+        reg = DatasetRegistry(tmp_path / "store")
+        specs = [
+            ("D001", 42, 300_000, "plain_copper"),
+            ("D002", 7, 320_000, "microporous_copper"),
+            ("D003", 123, 290_000, "nanostructured_copper"),
+        ]
+        for ds_id, seed, q_mean, surface in specs:
+            raw = self._make_npz(tmp_path, ds_id, seed, q_mean)
+            reg.register(DatasetEntry(ds_id, "water", "flow_boiling", surface,
+                                      "Test", raw_path=raw, spatial_crop=2))
+        ext = FeatureExtractor(reg, n_pod_modes=3)
+        for ds_id, *_ in specs:
+            ext.process(ds_id, force=True)
+        return reg
+
+    def test_cross_dataset_split_sizes(self, registry_with_three):
+        """Train pool = ALL of D001+D002; test = ALL of D003 (no leakage)."""
+        from icarus.registry.trainer import MultiDatasetTrainer
+
+        reg = registry_with_three
+        n3 = reg.get("D003").n_samples
+        n1 = reg.get("D001").n_samples
+        n2 = reg.get("D002").n_samples
+
+        trainer = MultiDatasetTrainer(reg, n_pod_modes=3,
+                                      n_training_samples=None,
+                                      optimise_hyperparams=False)
+        trainer.model_ = HeatFluxNet(strategy="modal",
+                                     hidden_layer_sizes=(16,), max_iter=20)
+        trainer.cross_dataset_fit(train_ids=["D001", "D002"], test_id="D003",
+                                  verbose=False)
+
+        # Held-out test set is exactly all of D003, nothing more, nothing less.
+        assert len(trainer._X_test) == n3
+        assert len(trainer._X_train) == n1 + n2
+        assert trainer._test_dataset_id == "D003"
+        assert trainer._fitted
+
+        metrics = trainer.evaluate(verbose=False)
+        assert "test" in metrics and "train" in metrics
+
+    def test_test_id_in_train_ids_raises(self, registry_with_three):
+        """Refuse to leak: a test dataset may not also be a train dataset."""
+        from icarus.registry.trainer import MultiDatasetTrainer
+
+        trainer = MultiDatasetTrainer(registry_with_three, n_pod_modes=3,
+                                      optimise_hyperparams=False)
+        with pytest.raises(ValueError, match="leak"):
+            trainer.cross_dataset_fit(train_ids=["D001", "D003"], test_id="D003",
+                                      verbose=False)
+
+    def test_empty_train_ids_raises(self, registry_with_three):
+        from icarus.registry.trainer import MultiDatasetTrainer
+
+        trainer = MultiDatasetTrainer(registry_with_three, n_pod_modes=3,
+                                      optimise_hyperparams=False)
+        with pytest.raises(ValueError):
+            trainer.cross_dataset_fit(train_ids=[], test_id="D003", verbose=False)
