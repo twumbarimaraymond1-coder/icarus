@@ -18,19 +18,22 @@ on a 17M-sample flow boiling dataset — a 69 % improvement over the linear base
 
 ## Installation
 
+Install directly from GitHub:
+
 ```bash
-pip install icarus
+pip install git+https://github.com/twumbarimaraymond1-coder/icarus
 ```
 
-Or from source:
+Or from source (recommended for development):
 
 ```bash
-git clone https://github.com/yourusername/icarus
+git clone https://github.com/twumbarimaraymond1-coder/icarus
 cd icarus
 pip install -e ".[dev]"
 ```
 
-**Requirements:** Python ≥ 3.9, NumPy, SciPy, scikit-learn, Optuna, Matplotlib
+**Requirements:** Python ≥ 3.9, NumPy, SciPy, scikit-learn, Optuna, Matplotlib.
+The package name on install is `icarus-thermal`; the import name is `icarus`.
 
 ---
 
@@ -83,6 +86,80 @@ The modal strategy works by:
 1. Decomposing the temperature field into dominant POD modes
 2. Learning a mapping from temperature modal coefficients → heat flux modal coefficients
 3. Reconstructing the full heat flux field from the predicted coefficients
+
+---
+
+## Cross-dataset generalisation (multi-dataset workflow)
+
+Beyond the single-dataset `Pipeline`, icarus includes a dataset registry for
+training across multiple experiments and testing on a fully held-out one
+(leave-one-surface-out). This answers the stronger question *"does the
+temperature→heat-flux modal coupling transfer to an experiment the model has
+never seen?"* — not merely to unseen timesteps of the same experiment.
+
+```python
+from icarus.registry.dataset import DatasetRegistry, DatasetEntry
+from icarus.registry.extractor import FeatureExtractor
+from icarus.registry.trainer import MultiDatasetTrainer
+
+reg = DatasetRegistry("~/.icarus/datasets")
+for ds_id, path in [("D001", "surface1.mat"),
+                    ("D002", "surface2.mat"),
+                    ("D003", "surface3.mat")]:
+    reg.register(DatasetEntry(ds_id, "water", "flow_boiling", "patch",
+                              "MyLab", raw_path=path))
+
+ext = FeatureExtractor(reg, n_pod_modes=5)
+for ds_id in ("D001", "D002", "D003"):
+    ext.process(ds_id)
+
+trainer = MultiDatasetTrainer(reg, n_pod_modes=5)
+trainer.cross_dataset_fit(train_ids=["D001", "D002"], test_id="D003")
+metrics = trainer.evaluate()   # fluctuation + absolute-field R²/RMSE
+```
+
+A runnable end-to-end script is provided in
+[`examples/cross_dataset_real.py`](examples/cross_dataset_real.py)
+(real `.mat` files) and
+[`examples/cross_dataset_eval.py`](examples/cross_dataset_eval.py) (synthetic).
+
+---
+
+## Metrics: fluctuation vs absolute R²
+
+`MultiDatasetTrainer.evaluate()` reports **two** test metrics, and the
+distinction matters when comparing results:
+
+- **Fluctuation R²** (returned as `"test"` / `"test_fluctuation"`) is computed
+  on the mean-subtracted heat-flux field — the quantity the POD modal model
+  actually predicts. It measures how well the temperature→heat-flux *modal
+  coupling* is captured. This is the honest headline number.
+- **Absolute R²** (`"test_absolute"`) adds the per-pixel time-mean field back
+  to both truth and prediction. It is always more flattering, because the
+  large quasi-static spatial mean dominates the variance.
+
+When citing or comparing results from this package, state which metric you
+are using.
+
+---
+
+## Assumptions & conventions (read before using your own data)
+
+- **Array convention** is `[ny, nx, nt]` for all 3-D fields. Time-major
+  flattening (`transpose(2, 0, 1)` before reshape) is used throughout so that
+  temporal train/test splits are genuine past→future splits.
+- **4-D temperature arrays** `[ny, nx, nz, nt]` are reduced by taking
+  **z-layer 0**, assumed to be the heater surface. If your surface is at a
+  different layer, slice before loading (`from_arrays(T[:, :, k, :], q)`).
+- **MATLAB v7.3 files** (HDF5-based) are handled automatically, including
+  MATLAB's reversed axis storage order.
+- **Default variable names** are `T` (temperature), `qL2` (heat flux), and
+  `TimeStep` (scalar dt in seconds) — all overridable via keyword arguments
+  to `load()` / `FeatureExtractor.process()`.
+- **Units** are assumed to be kelvin and W/m²; RMSE/MAE are reported in the
+  units of the heat-flux input.
+- POD `modal_contributions()` returns `U^T X_c` scaling (no extra σ
+  multiplication); see docstrings before composing with your own SVD code.
 
 ---
 
@@ -183,9 +260,31 @@ icarus/
 
 ---
 
+## Data availability
+
+The flow-boiling experimental datasets used to develop and validate this
+package were produced at Loughborough University and are **not redistributed
+in this repository**; they may be available from the authors / Loughborough
+University on reasonable request. All code paths can be exercised without
+them: `examples/quickstart.py` and `examples/cross_dataset_eval.py` generate
+synthetic data, and the test suite (`pytest tests/`) is fully self-contained.
+
+---
+
+## Citation
+
+If you use icarus in academic work, please cite it (see `CITATION.cff`):
+
+> Twum-Barima, R. (2026). *icarus: data-driven heat flux prediction from
+> infrared thermography* (v0.1.0) [Computer software].
+> https://github.com/twumbarimaraymond1-coder/icarus
+
+---
+
 ## Known limitations
 
-- Experimental datasets are not included in this repository.
+- Experimental datasets are not included in this repository (see *Data
+  availability*).
 - The reported Model C R² = 0.729 is dataset-specific and should be revalidated on independent datasets before being cited as a general result.
 - The default ANN search space (`"medium"`) is designed for moderate-sized datasets with 5 POD modes. Larger mode counts or datasets may require `hyperparam_search_space="large"` and more Optuna trials.
 - Current models use scikit-learn MLPs. Future versions may include PyTorch models for larger-scale training and GPU acceleration.

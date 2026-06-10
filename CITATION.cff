@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+type: software
+title: "icarus: data-driven heat flux prediction from infrared thermography"
+authors:
+  - family-names: Twum-Barima
+    given-names: Raymond
+version: 0.1.0
+date-released: 2026-06-10
+license: MIT
+repository-code: "https://github.com/twumbarimaraymond1-coder/icarus"
+keywords:
+  - heat transfer
+  - infrared thermography
+  - proper orthogonal decomposition
+  - dynamic mode decomposition
+  - machine learning
+  - flow boiling
+abstract: >-
+  icarus provides a full pipeline from raw infrared camera data to trained
+  heat-flux prediction models using Proper Orthogonal Decomposition (POD),
+  Dynamic Mode Decomposition (DMD), and neural networks, including a
+  multi-dataset registry for cross-dataset (leave-one-surface-out)
+  generalisation evaluation.
