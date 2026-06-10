@@ -9,9 +9,12 @@ Each processed dataset produces a ``features.h5`` file containing:
     /T_contribs     [n_samples, n_modes]  temperature modal contributions
     /q_contribs     [n_samples, n_modes]  heat flux modal contributions
     /q_flat         [n_samples]           raw heat flux, TIME-major (legacy)
-    /q_abs          [n_samples]           absolute heat flux, PIXEL-major,
+    /q_abs          [n_samples]           absolute heat flux, TIME-major,
                                           row-aligned with q_contribs
     /q_mean_field   [n_pix]               per-pixel time-mean heat flux
+
+All per-sample arrays are TIME-major (row = t * n_pix + p), so the split
+mask's first ``nt_train * n_pix`` rows are a genuine temporal train window.
     /split          [n_samples]           0=train, 1=test (integer mask)
     /metadata       (HDF5 attributes)     fluid, setup, n_modes, etc.
 
@@ -144,18 +147,22 @@ class FeatureExtractor:
         q_contribs = pod_q.modal_contributions(
             X_c_q, chunk_size=512, dtype=np.float32)
 
-        # Reshape to [n_samples, n_modes]
-        X_feat = T_contribs.reshape(n_pix * nt, self.n_pod_modes).astype(np.float32)
-        y_feat = q_contribs.reshape(n_pix * nt, self.n_pod_modes).astype(np.float32)
+        # Reshape to [n_samples, n_modes], TIME-major (row = t*n_pix + p).
+        # The split mask below marks the first nt_train*n_pix rows as train,
+        # which is only a temporal split under time-major ordering — a
+        # pixel-major reshape here would silently turn it into a spatial pixel
+        # split (train/test sharing every timestep). Guarded by
+        # tests/test_core.py::TestExtractorTimeMajorOrdering.
+        X_feat = (T_contribs.transpose(1, 0, 2)
+                  .reshape(n_pix * nt, self.n_pod_modes).astype(np.float32))
+        y_feat = (q_contribs.transpose(1, 0, 2)
+                  .reshape(n_pix * nt, self.n_pod_modes).astype(np.float32))
         q_flat = flatten_target(q)                      # [n_pix * nt], time-major
 
-        # Absolute (un-centred) heat flux + per-pixel mean field, both stored in
-        # PIXEL-major order so they are row-aligned with q_contribs/T_contribs
-        # (whose reshape above is pixel-major: row = pixel*nt + t). These let the
-        # trainer report a true absolute-field R² alongside the fluctuation R².
-        # NB: q_flat above is time-major and is NOT row-aligned with q_contribs —
-        # kept only for backward compatibility; use q_abs for alignment.
-        q_abs = q.reshape(n_pix * nt).astype(np.float32)        # [n_pix*nt], pixel-major
+        # Absolute (un-centred) heat flux + per-pixel mean field, time-major so
+        # they are row-aligned with q_contribs/T_contribs. These let the trainer
+        # report a true absolute-field R² alongside the fluctuation R².
+        q_abs = flatten_target(q).astype(np.float32)             # [n_pix*nt]
         q_mean_field = q.mean(axis=2).reshape(n_pix).astype(np.float32)  # [n_pix]
 
         # Train/test mask (0=train, 1=test)

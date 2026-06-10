@@ -172,8 +172,11 @@ class Pipeline:
         self._X_train, self._X_test = X_train, X_test
         self._y_train, self._y_test = y_train, y_test
 
-        # 5. Model
-        self.model_ = HeatFluxNet(strategy=self.strategy, random_state=self.random_state)
+        # 5. Model — respect a manually injected HeatFluxNet (e.g. with preset
+        # hyperparameters); only create a fresh one if none was provided.
+        if self.model_ is None:
+            self.model_ = HeatFluxNet(strategy=self.strategy,
+                                      random_state=self.random_state)
 
         if self.optimise_hyperparams:
             if verbose:

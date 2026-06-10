@@ -490,7 +490,7 @@ class MultiDatasetTrainer:
     ) -> Optional[np.ndarray]:
         """Load the absolute (un-centred) heat-flux target if present.
 
-        Stored pixel-major by the extractor so it is row-aligned with
+        Stored time-major by the extractor so it is row-aligned with
         ``q_contribs``/``T_contribs``. Returns None for older feature files
         that do not contain ``q_abs`` (absolute R² is then skipped gracefully).
         """
