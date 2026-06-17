@@ -79,6 +79,78 @@ def load(
         )
 
 
+def load_field(
+    path: Union[str, Path],
+    field: str = "heatflux",
+    *,
+    temperature_key: str = "T",
+    heatflux_key: str = "qL2",
+    timestep_key: str = "TimeStep",
+) -> tuple[np.ndarray, float]:
+    """Load a single field as ``[ny, nx, nt]`` plus ``dt``, reading minimally.
+
+    Unlike :func:`load` (which reads every variable), this reads only the one
+    field you ask for. For a 4-D temperature array in a v7.3 ``.mat`` file it
+    slices only the heater surface layer (z index 0) off disk, so memory use
+    stays low (~one layer instead of the full volume — important for the large
+    real datasets).
+
+    Parameters
+    ----------
+    path : str or Path
+    field : {"heatflux", "temperature"}
+        Which field to read. "temp" is accepted as an alias for temperature.
+    temperature_key, heatflux_key, timestep_key : str
+        Variable names in the source file.
+
+    Returns
+    -------
+    (field_array, dt) : (np.ndarray [ny, nx, nt], float)
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f"Data file not found: {path}")
+
+    key = temperature_key if field in ("temp", "temperature") else heatflux_key
+    suffix = path.suffix.lower()
+
+    if suffix in {".mat", ".h5", ".hdf5"}:
+        import h5py
+
+        with h5py.File(path, "r") as f:
+            if key not in f:
+                raise ValueError(
+                    f"'{key}' not found in {path}. Available: {list(f.keys())}"
+                )
+            dataset = f[key]
+            # MATLAB stores arrays axis-reversed.
+            if dataset.ndim == 4:
+                # stored [nt, nz, nx, ny] -> heater layer 0 -> [nt, nx, ny]
+                raw = np.asarray(dataset[:, 0, :, :], dtype=np.float64)
+            elif dataset.ndim == 3:
+                raw = np.asarray(dataset[...], dtype=np.float64)  # [nt, nx, ny]
+            else:
+                raise ValueError(
+                    f"Expected 3-D or 4-D '{key}', got ndim={dataset.ndim}."
+                )
+            field_array = raw.transpose(2, 1, 0)        # -> [ny, nx, nt]
+            if timestep_key in f:
+                dt = float(np.array(f[timestep_key]).flat[0])
+            else:
+                dt = 1.0
+        return field_array, dt
+
+    # .npz / .npy
+    archive = np.load(path)
+    if key not in archive:
+        raise ValueError(f"'{key}' not found in {path}.")
+    field_array = np.asarray(archive[key], dtype=np.float64)
+    if field_array.ndim == 4:
+        field_array = field_array[:, :, 0, :]
+    dt = float(archive[timestep_key]) if timestep_key in archive else 1.0
+    return field_array, dt
+
+
 def from_arrays(
     T: np.ndarray,
     q: np.ndarray,

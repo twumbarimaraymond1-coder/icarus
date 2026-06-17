@@ -125,6 +125,30 @@ A runnable end-to-end script is provided in
 
 ---
 
+## Spectral POD (frequency-resolved structures)
+
+Where POD ranks modes by energy alone, **SPOD** produces modes coherent at a
+single frequency — separating boiling structures by timescale (nucleation,
+bubble departure, microlayer). The high-level API mirrors the Quickstart:
+
+```python
+import icarus as tf
+
+# Low-memory load of one field (reads only the heater layer of 4-D temperature)
+field, dt = tf.load_field("MODEL_~1.MAT", field="heatflux")
+
+# Fit Spectral POD straight from the [ny, nx, nt] field
+spod = tf.SPOD(block_size=1024).fit_field(field, dt=dt, spatial_crop=5, trim_frames=43)
+
+print(spod.dominant_frequencies(n=4))       # candidate dominant timescales (Hz)
+spod.plot_spectrum("spectrum.png")          # energy vs frequency
+spod.plot_mode(spod.dominant_frequencies()[0], "mode.png")  # structure at top peak
+```
+
+A runnable version is in [`examples/spod_analysis.py`](examples/spod_analysis.py).
+
+---
+
 ## Metrics: fluctuation vs absolute R²
 
 `MultiDatasetTrainer.evaluate()` reports **two** test metrics, and the

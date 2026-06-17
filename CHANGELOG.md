@@ -4,6 +4,21 @@ All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 versions follow [SemVer](https://semver.org/).
 
+## [0.4.0] — 2026-06-17
+
+### Added
+- High-level SPOD API so analysis reads like the Quickstart:
+  - `icarus.load_field(path, field)` — low-memory single-field loader (reads
+    only the heater z-layer of 4-D temperature off disk).
+  - `SPOD.fit_field(field, dt, spatial_crop, trim_frames)` — fit straight from
+    a `[ny, nx, nt]` field (handles crop/trim/centre/flatten).
+  - `SPOD.plot_spectrum(path)` and `SPOD.plot_mode(freq, path)`.
+  - `SPOD` and `load_field` exported at the top level (`tf.SPOD`, `tf.load_field`).
+- `examples/spod_analysis.py` rewritten as a ~10-line Quickstart-style script.
+
+### Fixed
+- `__version__` is now correct (was stale at 0.1.0).
+
 ## [0.3.0] — 2026-06-17
 
 ### Changed

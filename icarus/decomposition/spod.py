@@ -108,6 +108,8 @@ class SPOD:
         self.eigenvalues_: Optional[np.ndarray] = None
         self.n_blocks_: Optional[int] = None
         self.n_modes_retained_: Optional[int] = None
+        self.ny_: Optional[int] = None      # set by fit_field, for plot_mode
+        self.nx_: Optional[int] = None
         self._dt: Optional[float] = None
 
     # ── public API ────────────────────────────────────────────────────────────
@@ -144,6 +146,48 @@ class SPOD:
         self.modes_ = modes
         self.eigenvalues_ = eigs
         return self
+
+    def fit_field(
+        self,
+        field: np.ndarray,
+        dt: float = 1.0,
+        spatial_crop: int = 0,
+        trim_frames: int = 0,
+    ) -> "SPOD":
+        """Fit SPOD directly on a ``[ny, nx, nt]`` field.
+
+        Handles the bookkeeping :meth:`fit` leaves to the caller: optional
+        border cropping and startup-frame trimming, per-pixel mean removal, and
+        flattening to a ``[n_pix, nt]`` matrix. The spatial shape is remembered
+        so :meth:`plot_mode` can reshape modes back to an image.
+
+        Parameters
+        ----------
+        field : np.ndarray, shape [ny, nx, nt]
+        dt : float
+            Timestep in seconds.
+        spatial_crop : int
+            Border pixels to drop from each edge.
+        trim_frames : int
+            Leading frames to drop (startup transient).
+
+        Returns
+        -------
+        self
+        """
+        if field.ndim != 3:
+            raise ValueError(f"field must be [ny, nx, nt], got {field.shape}.")
+        if spatial_crop > 0:
+            field = field[spatial_crop:-spatial_crop, spatial_crop:-spatial_crop, :]
+        if trim_frames > 0:
+            field = field[:, :, trim_frames:]
+
+        ny, nx, nt = field.shape
+        self.ny_, self.nx_ = ny, nx
+
+        snapshots = field.reshape(ny * nx, nt)
+        centred = snapshots - snapshots.mean(axis=1, keepdims=True)
+        return self.fit(centred, dt=dt)
 
     def spectrum(self, mode: int = 0) -> np.ndarray:
         """Energy of a given SPOD mode across frequency.
@@ -228,6 +272,79 @@ class SPOD:
             idx = np.array([int(np.argmax(e[1:]) + 1)])
         idx = idx[np.argsort(e[idx])[::-1][:n]]
         return self.frequencies_[idx]
+
+    # ── plotting ────────────────────────────────────────────────────────────
+
+    def plot_spectrum(
+        self,
+        path: Optional[str] = None,
+        n_modes: int = 3,
+        mark_peaks: int = 4,
+        ax=None,
+    ):
+        """Plot modal energy vs frequency (log y), marking the dominant peaks.
+
+        Saves a PNG to ``path`` if given (and closes the figure); otherwise
+        returns the matplotlib ``Axes`` for further customisation. matplotlib
+        is imported lazily so it stays an optional dependency.
+        """
+        self._require_fit()
+        import matplotlib.pyplot as plt
+
+        if ax is None:
+            _, ax = plt.subplots(figsize=(8, 4.5))
+
+        freqs = self.frequencies_
+        for m in range(min(n_modes, self.n_modes_retained_)):
+            ax.semilogy(freqs, self.spectrum(m), lw=1.3, label=f"mode {m + 1}")
+
+        if mark_peaks:
+            leading = self.spectrum(0)
+            for pf in self.dominant_frequencies(n=mark_peaks):
+                k = int(np.argmin(np.abs(freqs - pf)))
+                ax.axvline(freqs[k], color="grey", ls="--", lw=0.8, alpha=0.6)
+                ax.annotate(f"{freqs[k]:.1f} Hz", (freqs[k], leading[k]),
+                            textcoords="offset points", xytext=(4, 4), fontsize=8)
+
+        ax.set_xlabel("Frequency (Hz)")
+        ax.set_ylabel("SPOD modal energy")
+        ax.legend()
+        return self._finish_plot(ax, path)
+
+    def plot_mode(self, freq: float, path: Optional[str] = None, mode: int = 0, ax=None):
+        """Plot ``|SPOD mode|`` at a frequency as a ``[ny, nx]`` image.
+
+        Requires the model to have been fitted with :meth:`fit_field` (so the
+        spatial shape is known). Saves to ``path`` if given, else returns the
+        ``Axes``.
+        """
+        self._require_fit()
+        if self.ny_ is None:
+            raise RuntimeError(
+                "Spatial shape unknown — fit with fit_field() to use plot_mode()."
+            )
+        import matplotlib.pyplot as plt
+
+        if ax is None:
+            _, ax = plt.subplots(figsize=(5, 4))
+
+        k = int(np.argmin(np.abs(self.frequencies_ - freq)))
+        image = np.abs(self.mode(freq, mode=mode)).reshape(self.ny_, self.nx_)
+        handle = ax.imshow(image, cmap="inferno", origin="lower")
+        ax.set_title(f"SPOD mode @ {self.frequencies_[k]:.1f} Hz")
+        ax.figure.colorbar(handle, ax=ax, label="|mode| (coherent amplitude)")
+        return self._finish_plot(ax, path)
+
+    @staticmethod
+    def _finish_plot(ax, path):
+        """Save+close if a path is given, else return the Axes."""
+        if path is None:
+            return ax
+        import matplotlib.pyplot as plt
+        ax.figure.tight_layout()
+        ax.figure.savefig(path, dpi=130)
+        plt.close(ax.figure)
+        return None
 
     # ── private helpers ───────────────────────────────────────────────────────
 

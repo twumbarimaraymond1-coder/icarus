@@ -292,6 +292,78 @@ class TestSPOD:
             SPOD().mode(freq=1.0)
 
 
+class TestSpodHighLevelAPI:
+    """The convenience API that makes SPOD usage read like the Quickstart:
+    load_field -> SPOD().fit_field -> plot_spectrum / plot_mode."""
+
+    def _write_npz(self, tmp_path):
+        ny, nx, nt = 16, 18, 600
+        dt = 0.001
+        yy, _ = np.meshgrid(np.linspace(0, 1, nx), np.linspace(0, 1, ny))
+        t = np.arange(nt) * dt
+        q = 3e5 + 5e4 * np.sin(np.pi * yy)[:, :, None] * np.sin(2 * np.pi * 40 * t)
+        p = tmp_path / "d.npz"
+        np.savez(p, qL2=q.astype(np.float32), T=q.astype(np.float32), TimeStep=dt)
+        return p, ny, nx, nt, dt
+
+    def test_load_field_shape_and_dt(self, tmp_path):
+        from icarus.data.loader import load_field
+        p, ny, nx, nt, dt = self._write_npz(tmp_path)
+        field, dt_read = load_field(p, "heatflux")
+        assert field.shape == (ny, nx, nt)
+        assert abs(dt_read - dt) < 1e-12
+
+    def test_fit_field_matches_manual_pipeline(self, tmp_path):
+        from icarus.data.loader import load_field
+        p, ny, nx, nt, dt = self._write_npz(tmp_path)
+        field, _ = load_field(p, "heatflux")
+
+        # Manual: crop/trim/centre then fit on the matrix.
+        f = field[2:-2, 2:-2, 5:]
+        Ny, Nx, Nt = f.shape
+        X = f.reshape(Ny * Nx, Nt)
+        X_c = X - X.mean(axis=1, keepdims=True)
+        manual = SPOD(n_modes=2, block_size=128).fit(X_c, dt=dt)
+
+        # High-level: fit_field does the same bookkeeping.
+        hi = SPOD(n_modes=2, block_size=128).fit_field(
+            field, dt=dt, spatial_crop=2, trim_frames=5)
+
+        np.testing.assert_allclose(hi.eigenvalues_, manual.eigenvalues_, rtol=1e-9)
+        assert (hi.ny_, hi.nx_) == (Ny, Nx)
+
+    def test_plot_methods_write_files(self, tmp_path):
+        from icarus.data.loader import load_field
+        p, *_ = self._write_npz(tmp_path)
+        field, dt = load_field(p, "heatflux")
+        spod = SPOD(n_modes=2, block_size=128).fit_field(
+            field, dt=dt, spatial_crop=2, trim_frames=5)
+
+        spec = tmp_path / "spectrum.png"
+        spod.plot_spectrum(path=str(spec))
+        assert spec.exists() and spec.stat().st_size > 0
+
+        peak = spod.dominant_frequencies(n=1)[0]
+        mode_png = tmp_path / "mode.png"
+        spod.plot_mode(peak, path=str(mode_png))
+        assert mode_png.exists() and mode_png.stat().st_size > 0
+
+    def test_plot_mode_requires_fit_field(self, tmp_path):
+        p, *_ = self._write_npz(tmp_path)
+        from icarus.data.loader import load_field
+        field, dt = load_field(p, "heatflux")
+        # fit() (matrix) doesn't know ny/nx, so plot_mode must refuse.
+        X = field.reshape(field.shape[0] * field.shape[1], field.shape[2])
+        spod = SPOD(n_modes=2, block_size=128).fit(X - X.mean(1, keepdims=True), dt=dt)
+        with pytest.raises(RuntimeError, match="fit_field"):
+            spod.plot_mode(40.0)
+
+    def test_top_level_exports(self):
+        import icarus
+        assert hasattr(icarus, "SPOD")
+        assert hasattr(icarus, "load_field")
+
+
 # ── DMD tests ─────────────────────────────────────────────────────────────────
 
 class TestDMD:

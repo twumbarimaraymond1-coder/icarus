@@ -35,18 +35,23 @@ pipeline        : End-to-end Pipeline orchestrator
 from icarus.pipeline.runner import Pipeline
 from icarus.decomposition.pod import POD
 from icarus.decomposition.dmd import DMD
+from icarus.decomposition.spod import SPOD
 from icarus.data.preprocessor import Preprocessor
+from icarus.data.loader import load, load_field
 from icarus.models.neural import HeatFluxNet, SEARCH_SPACES
 from icarus.metrics.evaluation import evaluate
 
-__version__ = "0.1.0"
+__version__ = "0.4.0"
 __author__ = "Raymond Twum-Barima"
 
 __all__ = [
     "Pipeline",
     "POD",
     "DMD",
+    "SPOD",
     "Preprocessor",
+    "load",
+    "load_field",
     "HeatFluxNet",
     "SEARCH_SPACES",
     "evaluate",
