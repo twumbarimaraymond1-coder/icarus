@@ -9,6 +9,7 @@ from icarus.data.loader import from_arrays
 from icarus.data.preprocessor import Preprocessor, PreprocessorConfig
 from icarus.decomposition.pod import POD
 from icarus.decomposition.dmd import DMD
+from icarus.decomposition.spod import SPOD
 from icarus.features.engineer import (
     build_raw_features,
     build_gradient_features,
@@ -205,6 +206,79 @@ class TestPOD:
         pod = POD(n_modes=5)
         with pytest.raises(RuntimeError):
             pod.reconstruct()
+
+
+# ── SPOD tests ────────────────────────────────────────────────────────────────
+
+class TestSPOD:
+    @pytest.fixture
+    def two_tone_data(self):
+        """Two distinct spatial patterns oscillating at two known frequencies.
+        SPOD must separate them by frequency and recover each pattern."""
+        rng = np.random.default_rng(0)
+        n_pix, nt = 24, 1024
+        dt = 0.01                       # fs = 100 Hz
+        block = 128
+        df = 1.0 / (block * dt)         # frequency resolution
+        # Put both tones exactly on FFT bins so they don't leak across bins.
+        f1, f2 = 8 * df, 20 * df
+        p1 = rng.standard_normal(n_pix)
+        p2 = rng.standard_normal(n_pix)
+        p1 /= np.linalg.norm(p1)
+        p2 /= np.linalg.norm(p2)
+        t = np.arange(nt) * dt
+        X = (np.outer(p1, np.sin(2 * np.pi * f1 * t))
+             + 0.4 * np.outer(p2, np.sin(2 * np.pi * f2 * t)))
+        X_c = X - X.mean(axis=1, keepdims=True)
+        return dict(X_c=X_c, dt=dt, block=block, f1=f1, f2=f2, p1=p1, p2=p2)
+
+    def test_fit_shapes(self, two_tone_data):
+        d = two_tone_data
+        spod = SPOD(n_modes=3, block_size=d["block"]).fit(d["X_c"], dt=d["dt"])
+        n_freq = d["block"] // 2 + 1
+        assert spod.frequencies_.shape == (n_freq,)
+        assert spod.modes_.shape == (n_freq, d["X_c"].shape[0], 3)
+        assert spod.eigenvalues_.shape == (n_freq, 3)
+
+    def test_eigenvalues_sorted_per_frequency(self, two_tone_data):
+        d = two_tone_data
+        spod = SPOD(n_modes=4, block_size=d["block"]).fit(d["X_c"], dt=d["dt"])
+        for k in range(spod.frequencies_.size):
+            row = spod.eigenvalues_[k]
+            assert np.all(np.diff(row) <= 1e-9), "energies must be descending"
+
+    def test_spectrum_peaks_at_injected_frequencies(self, two_tone_data):
+        d = two_tone_data
+        spod = SPOD(n_modes=2, block_size=d["block"]).fit(d["X_c"], dt=d["dt"])
+        energy = spod.spectrum()                 # leading-mode energy vs f
+        f = spod.frequencies_
+        peak_f = f[energy.argmax()]
+        assert abs(peak_f - d["f1"]) < 0.5 / (d["block"] * d["dt"]), \
+            "dominant SPOD energy must sit at the strongest injected tone"
+        # The second tone should clearly outrank a quiet background bin.
+        k2 = int(np.argmin(np.abs(f - d["f2"])))
+        quiet = int(np.argmin(np.abs(f - (d["f2"] + 8 / (d["block"] * d["dt"])))))
+        assert energy[k2] > 10 * energy[quiet]
+
+    def test_leading_modes_recover_spatial_patterns(self, two_tone_data):
+        d = two_tone_data
+        spod = SPOD(n_modes=2, block_size=d["block"]).fit(d["X_c"], dt=d["dt"])
+        m1 = spod.mode(freq=d["f1"])             # complex [n_pix]
+        m2 = spod.mode(freq=d["f2"])
+        # |cosine similarity| ~ 1 with the true pattern (phase is arbitrary).
+        def align(m, p):
+            return abs(np.vdot(m, p)) / (np.linalg.norm(m) * np.linalg.norm(p))
+        assert align(m1, d["p1"]) > 0.95
+        assert align(m2, d["p2"]) > 0.95
+
+    def test_block_size_larger_than_nt_raises(self):
+        spod = SPOD(block_size=64)
+        with pytest.raises(ValueError):
+            spod.fit(np.zeros((10, 32)), dt=0.01)
+
+    def test_use_before_fit_raises(self):
+        with pytest.raises(RuntimeError):
+            SPOD().mode(freq=1.0)
 
 
 # ── DMD tests ─────────────────────────────────────────────────────────────────
