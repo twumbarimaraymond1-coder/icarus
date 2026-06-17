@@ -7,6 +7,12 @@ dist/
 build/
 .eggs/
 
+# SPOD / analysis output
+spod_out*/
+spod_b*/
+spod_sweep_*/
+models/
+
 # Virtual environments
 .venv/
 venv/
