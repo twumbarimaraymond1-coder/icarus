@@ -57,6 +57,32 @@ conditions, we can add it to a community model registry.
 
 ---
 
+## Design principle: features must be user-friendly
+
+Icarus is used by researchers, not software engineers. **Every new feature
+must expose a high-level, few-lines-of-code API that mirrors the Quickstart**,
+not just a low-level primitive. The model is `tf.Pipeline` and `tf.SPOD`:
+
+- The headline usage of a feature should read like a recipe — a handful of
+  clear calls — with all machinery (loading, preprocessing, bookkeeping,
+  plotting) hidden inside the package, never re-implemented in the user's
+  script.
+- **Design the ~5-line usage first**, then build the implementation behind it.
+- Provide a one-call convenience that wraps the low-level steps (e.g.
+  `SPOD.fit_field` wraps crop/centre/flatten + `fit`), while keeping the
+  low-level primitive available for power users.
+- Export the main entry points at the top level (`icarus.X`) so they are
+  discoverable as `tf.X`.
+- Ship plotting/IO as methods or helpers (lazy-import optional deps like
+  matplotlib), so users never write boilerplate.
+- Document the feature with a Quickstart-style snippet in the README, add a
+  runnable `examples/` script, and **test the high-level path**, not only the
+  internals.
+
+If a feature can only be used by writing a long script, it is not finished.
+
+---
+
 ## Code style
 
 - Follow PEP 8. We use `ruff` for linting (`ruff check .`).
