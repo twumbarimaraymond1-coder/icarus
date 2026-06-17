@@ -271,6 +271,17 @@ class TestSPOD:
         assert align(m1, d["p1"]) > 0.95
         assert align(m2, d["p2"]) > 0.95
 
+    def test_dominant_frequencies_finds_injected_tones(self, two_tone_data):
+        d = two_tone_data
+        spod = SPOD(n_modes=2, block_size=d["block"]).fit(d["X_c"], dt=d["dt"])
+        tones = spod.dominant_frequencies(n=2)
+        df = 1.0 / (d["block"] * d["dt"])
+        # The two strongest peaks must be the two injected tones (within 1 bin).
+        assert min(abs(tones - d["f1"])) < df
+        assert min(abs(tones - d["f2"])) < df
+        # Strongest first (f1 has the larger amplitude in the fixture).
+        assert abs(tones[0] - d["f1"]) < df
+
     def test_block_size_larger_than_nt_raises(self):
         spod = SPOD(block_size=64)
         with pytest.raises(ValueError):

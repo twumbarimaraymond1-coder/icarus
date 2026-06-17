@@ -103,22 +103,6 @@ def preprocess(field: np.ndarray, spatial_crop: int, trim_frames: int
     return X_c, ny, nx
 
 
-# ── Peak picking ──────────────────────────────────────────────────────────────
-
-def find_peaks(freqs: np.ndarray, energy: np.ndarray, k: int = 4
-               ) -> list[int]:
-    """Return indices of up to k strongest local maxima (ignoring DC bin 0)."""
-    # local maxima
-    is_peak = np.zeros_like(energy, dtype=bool)
-    is_peak[1:-1] = (energy[1:-1] > energy[:-2]) & (energy[1:-1] > energy[2:])
-    is_peak[0] = False                          # skip DC / mean drift
-    cand = np.where(is_peak)[0]
-    if cand.size == 0:                          # fallback: just the max non-DC bin
-        return [int(np.argmax(energy[1:]) + 1)]
-    order = cand[np.argsort(energy[cand])[::-1]]
-    return [int(i) for i in order[:k]]
-
-
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main(args):
@@ -149,7 +133,9 @@ def main(args):
     print(f"  {spod.n_blocks_} Welch blocks, df = {f[1]-f[0]:.3g} Hz, "
           f"f_max = {f[-1]:.3g} Hz")
 
-    peaks = find_peaks(f, lead, k=args.n_peaks)
+    # Peak frequencies come straight from the package; map to bin indices.
+    peak_freqs = spod.dominant_frequencies(n=args.n_peaks)
+    peaks = [int(np.argmin(np.abs(f - pf))) for pf in peak_freqs]
     print("\nTop SPOD energy peaks (leading mode):")
     for rank, k in enumerate(peaks, 1):
         print(f"  {rank}. f = {f[k]:8.2f} Hz   energy = {lead[k]:.4e}")

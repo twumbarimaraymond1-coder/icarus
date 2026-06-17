@@ -128,57 +128,17 @@ class SPOD:
         """
         if X_c.ndim != 2:
             raise ValueError(f"X_c must be 2-D [n_pix, nt], got shape {X_c.shape}.")
-        n_pix, nt = X_c.shape
-        nfft = self.block_size
-        if nfft > nt:
+        if self.block_size > X_c.shape[1]:
             raise ValueError(
-                f"block_size ({nfft}) must be <= nt ({nt}). "
+                f"block_size ({self.block_size}) must be <= nt ({X_c.shape[1]}). "
                 "Use a smaller block_size for short records."
             )
         self._dt = float(dt)
 
-        # ── Block segmentation (Welch) ────────────────────────────────────────
-        n_ovlp = int(self.overlap * nfft)
-        step = nfft - n_ovlp
-        n_blocks = 1 + (nt - nfft) // step
-        if n_blocks < 1:
-            raise ValueError("Not enough timesteps for a single block.")
-        self.n_blocks_ = n_blocks
-
-        # ── Window + per-block FFT ────────────────────────────────────────────
-        if self.window == "hann":
-            win = np.hanning(nfft)
-        else:
-            win = np.ones(nfft)
-        # Energy-preserving scaling: normalise by the window power and block
-        # count so eigenvalues are comparable across configurations.
-        win_norm = np.sum(win**2)
-        scale = np.sqrt(self._dt / (win_norm * n_blocks))
-
-        freqs = np.fft.rfftfreq(nfft, d=self._dt)
-        n_freq = freqs.size
-
-        # Q_hat[f, pix, block] — windowed Fourier realisations
-        Q_hat = np.empty((n_freq, n_pix, n_blocks), dtype=np.complex128)
-        for b in range(n_blocks):
-            s = b * step
-            block = X_c[:, s:s + nfft] * win[None, :]      # [n_pix, nfft]
-            Q_hat[:, :, b] = np.fft.rfft(block, axis=1).T * scale
-
-        # ── Per-frequency SVD → SPOD modes + energies ─────────────────────────
-        retained = self.n_modes or n_blocks
-        retained = min(retained, n_blocks, n_pix)
-        self.n_modes_retained_ = retained
-
-        modes = np.zeros((n_freq, n_pix, retained), dtype=np.complex128)
-        eigs = np.zeros((n_freq, retained))
-        for k in range(n_freq):
-            # SVD of Q_f [n_pix, n_blocks]: left vectors are SPOD modes,
-            # singular values squared are the modal energies (eigenvalues of
-            # the cross-spectral density Q_f Q_f^*).
-            Uf, Sf, _ = np.linalg.svd(Q_hat[k], full_matrices=False)
-            modes[k] = Uf[:, :retained]
-            eigs[k, :Sf[:retained].size] = (Sf[:retained] ** 2)
+        # Welch: split into overlapping windowed blocks, FFT each in time.
+        freqs, Q_hat = self._welch_transform(X_c)
+        # Per-frequency SVD gives the coherent spatial modes and their energies.
+        modes, eigs = self._decompose_per_frequency(Q_hat, n_pix=X_c.shape[0])
 
         self.frequencies_ = freqs
         self.modes_ = modes
@@ -230,7 +190,94 @@ class SPOD:
         self._require_fit()
         return self.eigenvalues_.sum(axis=1)
 
+    def dominant_frequencies(
+        self,
+        n: int = 4,
+        mode: int = 0,
+        ignore_dc: bool = True,
+    ) -> np.ndarray:
+        """Frequencies (Hz) of the strongest spectral peaks, energy-sorted.
+
+        Finds local maxima in a mode's energy spectrum and returns the
+        frequencies of the ``n`` strongest, highest first. These are the
+        candidate dominant timescales (e.g. bubble departure) in the data.
+
+        Parameters
+        ----------
+        n : int
+            Maximum number of peaks to return.
+        mode : int
+            Mode rank whose spectrum is searched (0 = leading).
+        ignore_dc : bool
+            Skip the zero-frequency bin (the slow mean drift), which would
+            otherwise dominate.
+
+        Returns
+        -------
+        np.ndarray, shape [<= n]
+            Peak frequencies in Hz, sorted by descending energy.
+        """
+        self._require_fit()
+        e = self.eigenvalues_[:, mode]
+        is_peak = np.zeros(e.shape, dtype=bool)
+        is_peak[1:-1] = (e[1:-1] > e[:-2]) & (e[1:-1] > e[2:])
+        if ignore_dc:
+            is_peak[0] = False
+        idx = np.where(is_peak)[0]
+        if idx.size == 0:                       # fallback: strongest non-DC bin
+            idx = np.array([int(np.argmax(e[1:]) + 1)])
+        idx = idx[np.argsort(e[idx])[::-1][:n]]
+        return self.frequencies_[idx]
+
     # ── private helpers ───────────────────────────────────────────────────────
+
+    def _welch_transform(self, X_c: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Segment time into overlapping windowed blocks and FFT each.
+
+        Returns the one-sided frequency axis and the energy-normalised
+        windowed Fourier realisations ``Q_hat[freq, pix, block]``. Hann
+        windowing suppresses spectral leakage; the scaling normalises by window
+        power and block count so eigenvalues are comparable across settings.
+        """
+        n_pix, nt = X_c.shape
+        nfft = self.block_size
+        step = nfft - int(self.overlap * nfft)
+        n_blocks = 1 + (nt - nfft) // step
+        if n_blocks < 1:
+            raise ValueError("Not enough timesteps for a single block.")
+        self.n_blocks_ = n_blocks
+
+        win = np.hanning(nfft) if self.window == "hann" else np.ones(nfft)
+        scale = np.sqrt(self._dt / (np.sum(win**2) * n_blocks))
+        freqs = np.fft.rfftfreq(nfft, d=self._dt)
+
+        Q_hat = np.empty((freqs.size, n_pix, n_blocks), dtype=np.complex128)
+        for b in range(n_blocks):
+            s = b * step
+            block = X_c[:, s:s + nfft] * win[None, :]       # [n_pix, nfft]
+            Q_hat[:, :, b] = np.fft.rfft(block, axis=1).T * scale
+        return freqs, Q_hat
+
+    def _decompose_per_frequency(
+        self, Q_hat: np.ndarray, n_pix: int
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """SVD each frequency's realisation matrix into SPOD modes + energies.
+
+        For ``Q_hat[k]`` of shape [n_pix, n_blocks], the left singular vectors
+        are the SPOD modes and the squared singular values are the modal
+        energies (eigenvalues of the cross-spectral density ``Q_f Q_f^*``).
+        """
+        n_freq, _, n_blocks = Q_hat.shape
+        retained = min(self.n_modes or n_blocks, n_blocks, n_pix)
+        self.n_modes_retained_ = retained
+
+        modes = np.zeros((n_freq, n_pix, retained), dtype=np.complex128)
+        eigs = np.zeros((n_freq, retained))
+        for k in range(n_freq):
+            Uf, Sf, _ = np.linalg.svd(Q_hat[k], full_matrices=False)
+            modes[k] = Uf[:, :retained]
+            eigs[k, :Sf[:retained].size] = Sf[:retained] ** 2
+        return modes, eigs
 
     def _require_fit(self) -> None:
         if self.modes_ is None:
