@@ -287,17 +287,18 @@ class Pipeline:
         X_c_new = Preprocessor.to_matrix(T_c_new)
         T_contribs_new = self.pod_T_.modal_contributions(X_c_new, n_modes=self.n_pod_modes)
         X_new, _ = build_modal_features(T_contribs_new)
-        q_modal_pred = self.model_.predict(X_new)  # [n_pix*nt, n_modes]
+        q_modal_pred = self.model_.predict(X_new)  # [nt*n_pix, n_modes], time-major
 
-        # Reconstruct heat flux field from predicted modal contributions
-        q_modal_pred = q_modal_pred.reshape(ny * nx, nt, self.n_pod_modes)
-        q_c_pred = np.zeros((ny * nx, nt))
-        for i in range(self.n_pod_modes):
-            phi_i = self.pod_q_.modes_[:, i]
-            q_c_pred += q_modal_pred[:, :, i] * phi_i[:, np.newaxis]  # approximate
+        # The predicted modal contributions ALREADY include phi_i (they are the
+        # rank-1 fields phi_i * sigma_i * v_i), so reconstruct the centred field
+        # by summing across modes — do NOT multiply by phi_i again. This mirrors
+        # _reconstruct_from_modal_preds (used by evaluate()).
+        q_c_flat = q_modal_pred.sum(axis=1)                 # [nt*n_pix], time-major
+        q_mean_vec = self.preprocessor_.q_mean.reshape(-1)  # [n_pix]
+        q_flat = q_c_flat + np.tile(q_mean_vec, nt)         # add per-pixel mean
 
-        q_pred = q_c_pred + self.preprocessor_.q_mean.reshape(-1)[:, np.newaxis]
-        return q_pred.reshape(ny, nx, nt)
+        # Un-flatten time-major rows (row = t*n_pix + p) back to [ny, nx, nt].
+        return q_flat.reshape(nt, ny, nx).transpose(1, 2, 0)
 
     def _reconstruct_from_modal_preds(self, y_modal, split):
         """Reconstruct scalar heat flux from predicted modal contributions.

@@ -752,3 +752,44 @@ class TestPipelineModelInjection:
             # acceptable; the point is that a model object was created.
             pass
         assert pipe.model_ is not None
+
+
+class TestPipelineModalPredict:
+    """Regression guard for Pipeline._predict_modal (Model C inference on new
+    data). It must reconstruct the heat-flux field the SAME way evaluate() does:
+    sum the predicted modal contributions (which already include phi_i) and add
+    the per-pixel mean back, respecting time-major row ordering. The original
+    code multiplied predictions by phi_i again AND reshaped time-major rows as
+    pixel-major — so predict() returned a scrambled, double-counted field while
+    evaluate() (using the correct sibling) looked fine."""
+
+    def test_predict_matches_correct_modal_reconstruction(self, synthetic_data):
+        from icarus.pipeline.runner import Pipeline
+        from icarus.data.preprocessor import Preprocessor
+        from icarus.features.engineer import build_modal_features
+
+        pipe = Pipeline(strategy="modal", n_pod_modes=3, spatial_crop=2,
+                        optimise_hyperparams=False, n_training_samples=None)
+        pipe.model_ = HeatFluxNet(strategy="modal", hidden_layer_sizes=(16,),
+                                  max_iter=50)
+        pipe.fit(synthetic_data, verbose=False)
+
+        proc = pipe._processed
+        T_field = proc["T"]                       # preprocessed [ny, nx, nt]
+        ny, nx, nt = T_field.shape
+
+        # Independent, correct reconstruction (sum contributions + tile mean).
+        X_c = Preprocessor.to_matrix(proc["T_c"])
+        T_contribs = pipe.pod_T_.modal_contributions(X_c, n_modes=3)
+        X_feat, _ = build_modal_features(T_contribs)        # time-major
+        y_modal = pipe.model_.predict(X_feat)               # [nt*n_pix, 3]
+        q_c_flat = y_modal.sum(axis=1)
+        q_mean_vec = pipe.preprocessor_.q_mean.reshape(-1)
+        expected = q_c_flat + np.tile(q_mean_vec, nt)        # time-major flat
+
+        # predict() centres internally; passing the preprocessed T reproduces
+        # the same centred field, so outputs must match the expected field.
+        q_pred_field = pipe.predict(T_field)
+        assert q_pred_field.shape == (ny, nx, nt)
+        got = q_pred_field.transpose(2, 0, 1).reshape(-1)    # time-major flat
+        np.testing.assert_allclose(got, expected, rtol=1e-4, atol=1e-3)
