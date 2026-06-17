@@ -4,6 +4,19 @@ All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 versions follow [SemVer](https://semver.org/).
 
+## [0.3.0] — 2026-06-17
+
+### Changed
+- Refactored `SPOD` to match the `POD` structure: `fit()` is now a clean
+  sequence over `_welch_transform()` and `_decompose_per_frequency()` helpers
+  (behaviour unchanged, guarded by `TestSPOD`).
+
+### Added
+- `SPOD.dominant_frequencies(n)` — energy-sorted peak frequencies. The
+  `examples/spod_analysis.py` runner now uses it instead of a duplicated
+  local peak-finder.
+- v0.2.0 release notes (`docs/RELEASE_NOTES_v0.2.0.md`).
+
 ## [0.2.0] — 2026-06-17
 
 ### Added
