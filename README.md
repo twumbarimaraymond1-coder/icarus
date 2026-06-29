@@ -149,6 +149,32 @@ A runnable version is in [`examples/spod_analysis.py`](examples/spod_analysis.py
 
 ---
 
+## Timescale-resolved prediction with uncertainty
+
+`BandwiseModalModel` splits temperature and heat flux into frequency bands and
+learns a separate Model-C mapping per band ("Model C per timescale"), so you
+see which timescales transfer. With `n_members > 1` each band is a deep
+ensemble, giving a **calibrated uncertainty band** — combining epistemic
+(model disagreement) and aleatoric (irreducible boiling randomness) terms.
+
+```python
+import icarus as tf
+
+T, _  = tf.load_field("MODEL_~1.MAT", "temp")
+q, dt = tf.load_field("MODEL_~1.MAT", "heatflux")
+
+model = tf.BandwiseModalModel(edges=[200, 1000], n_pod_modes=5, n_members=5)
+model.fit(T, q, dt=dt, spatial_crop=5, trim_frames=43)
+
+model.evaluate()                                   # total + per-band R²
+mean, lower, upper = model.predict_interval(T, coverage=0.9)
+tf.interval_metrics(q[5:-5, 5:-5, 43:], lower, upper)   # coverage + sharpness
+```
+
+Runnable: [`examples/bandwise_stochastic.py`](examples/bandwise_stochastic.py).
+
+---
+
 ## Metrics: fluctuation vs absolute R²
 
 `MultiDatasetTrainer.evaluate()` reports **two** test metrics, and the

@@ -102,3 +102,39 @@ def evaluate_timeresolved(
         rmse_t[t] = np.sqrt(mean_squared_error(q_true[:, t], q_pred[:, t]))
 
     return {"r2_t": r2_t, "rmse_t": rmse_t}
+
+
+def interval_metrics(
+    y_true: np.ndarray,
+    lower: np.ndarray,
+    upper: np.ndarray,
+) -> dict[str, float]:
+    """Calibration metrics for a prediction interval.
+
+    A good uncertainty estimate is both *calibrated* (its coverage matches the
+    nominal level) and *sharp* (intervals are as narrow as possible). Report
+    both — high coverage with huge intervals is useless.
+
+    Parameters
+    ----------
+    y_true : np.ndarray
+        Ground-truth values.
+    lower, upper : np.ndarray
+        Lower and upper interval bounds, same shape as ``y_true``.
+
+    Returns
+    -------
+    dict with:
+        ``"coverage"`` — fraction of truths inside [lower, upper] (PICP;
+        compare to the nominal coverage you requested), and
+        ``"mean_width"`` — mean interval width (sharpness; smaller is better).
+    """
+    y_true = np.asarray(y_true).ravel()
+    lower = np.asarray(lower).ravel()
+    upper = np.asarray(upper).ravel()
+
+    inside = (y_true >= lower) & (y_true <= upper)
+    return {
+        "coverage": float(inside.mean()),
+        "mean_width": float((upper - lower).mean()),
+    }

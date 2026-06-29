@@ -33,27 +33,35 @@ pipeline        : End-to-end Pipeline orchestrator
 """
 
 from icarus.pipeline.runner import Pipeline
+from icarus.pipeline.bandwise import BandwiseModalModel
 from icarus.decomposition.pod import POD
 from icarus.decomposition.dmd import DMD
 from icarus.decomposition.spod import SPOD
 from icarus.data.preprocessor import Preprocessor
 from icarus.data.loader import load, load_field
+from icarus.features.partition import partition_by_frequency, Partition
 from icarus.models.neural import HeatFluxNet, SEARCH_SPACES
-from icarus.metrics.evaluation import evaluate
+from icarus.models.probabilistic import ProbabilisticHeatFluxNet
+from icarus.metrics.evaluation import evaluate, interval_metrics
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 __author__ = "Raymond Twum-Barima"
 
 __all__ = [
     "Pipeline",
+    "BandwiseModalModel",
     "POD",
     "DMD",
     "SPOD",
     "Preprocessor",
     "load",
     "load_field",
+    "partition_by_frequency",
+    "Partition",
     "HeatFluxNet",
+    "ProbabilisticHeatFluxNet",
     "SEARCH_SPACES",
     "evaluate",
+    "interval_metrics",
     "__version__",
 ]

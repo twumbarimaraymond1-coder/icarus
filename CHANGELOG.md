@@ -4,6 +4,29 @@ All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 versions follow [SemVer](https://semver.org/).
 
+## [0.5.0] — 2026-06-17
+
+Timescale-resolved, uncertainty-aware heat-flux prediction.
+
+### Added
+- `tf.partition_by_frequency(field, dt, edges)` — split a field into additive
+  frequency-band components (data-driven "heat partition"); exactly additive.
+- `tf.BandwiseModalModel` — a separate POD modal Model-C mapping per frequency
+  band ("Model C per timescale"), with `fit` / `predict` / `evaluate`
+  (total + per-band R²).
+- `tf.ProbabilisticHeatFluxNet` — deep ensemble giving a mean and
+  `predict_interval(coverage)`.
+- Stochastic band-wise prediction: `BandwiseModalModel(n_members>1)` +
+  `predict_interval`, combining **epistemic** (ensemble spread) and
+  **aleatoric** (irreducible scatter, incl. POD-truncated noise) uncertainty.
+  Calibrated on real data (90% interval -> ~90.6% coverage).
+- `tf.interval_metrics` — coverage (PICP) and sharpness (mean width).
+
+### Notes
+- On the Loughborough data, per-band R² differs sharply across timescales, and
+  the predictive uncertainty is dominated by the aleatoric term — i.e. boiling
+  heat flux is substantially stochastic at these scales.
+
 ## [0.4.0] — 2026-06-17
 
 ### Added

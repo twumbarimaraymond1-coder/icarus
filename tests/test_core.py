@@ -292,6 +292,248 @@ class TestSPOD:
             SPOD().mode(freq=1.0)
 
 
+class TestProbabilisticAndCalibration:
+    """Deep-ensemble uncertainty + calibration metrics."""
+
+    def test_interval_metrics_coverage_and_width(self):
+        from icarus.metrics.evaluation import interval_metrics
+        y = np.zeros(100)
+        lower = np.full(100, -1.0)
+        upper = np.full(100, 1.0)
+        y[:10] = 5.0                       # 10 of 100 fall outside
+        m = interval_metrics(y, lower, upper)
+        assert abs(m["coverage"] - 0.9) < 1e-9
+        assert abs(m["mean_width"] - 2.0) < 1e-9
+
+    def test_ensemble_interval_brackets_mean(self):
+        from icarus.models.probabilistic import ProbabilisticHeatFluxNet
+        rng = np.random.default_rng(0)
+        X = rng.standard_normal((400, 3))
+        y = X @ np.array([2.0, -1.0, 0.5]) + 0.1 * rng.standard_normal(400)
+        model = ProbabilisticHeatFluxNet(
+            n_members=4, strategy="raw",
+            hidden_layer_sizes=(16,), max_iter=200).fit(X, y)
+        mean, lo, hi = model.predict_interval(X, coverage=0.9)
+        assert mean.shape == (400,)
+        assert np.all(lo <= mean) and np.all(mean <= hi)
+        # wider coverage -> wider interval
+        _, lo80, hi80 = model.predict_interval(X, coverage=0.8)
+        assert (hi - lo).mean() >= (hi80 - lo80).mean() - 1e-9
+
+    def test_single_member_rejected(self):
+        from icarus.models.probabilistic import ProbabilisticHeatFluxNet
+        with pytest.raises(ValueError):
+            ProbabilisticHeatFluxNet(n_members=1)
+
+    def test_top_level_exports(self):
+        import icarus
+        assert hasattr(icarus, "ProbabilisticHeatFluxNet")
+        assert hasattr(icarus, "interval_metrics")
+
+
+class TestBandwiseStochastic:
+    """Band-wise model with ensembles: predict_interval returns a valid,
+    calibrated-ish uncertainty band on data with a clean coupling."""
+
+    def _coupled_fields(self):
+        ny, nx, nt = 10, 11, 700
+        dt = 0.001
+        rng = np.random.default_rng(2)
+        yy, xx = np.meshgrid(np.linspace(0, 1, nx), np.linspace(0, 1, ny))
+        t = np.arange(nt) * dt
+        slow = np.sin(np.pi * yy)[:, :, None] * np.sin(2 * np.pi * 30 * t)
+        fast = np.cos(np.pi * xx)[:, :, None] * np.sin(2 * np.pi * 300 * t)
+        T = 420.0 + 3.0 * slow + 2.0 * fast + 0.02 * rng.standard_normal((ny, nx, nt))
+        q = (3.0e5 - 1.2e4 * (3.0 * slow) + 0.6e4 * (2.0 * fast)
+             + 50.0 * rng.standard_normal((ny, nx, nt)))
+        return T, q, dt
+
+    def test_predict_interval_shapes_and_ordering(self):
+        from icarus.pipeline.bandwise import BandwiseModalModel
+        T, q, dt = self._coupled_fields()
+        model = BandwiseModalModel(
+            edges=[150], n_pod_modes=3, n_members=3,
+            model_kwargs={"hidden_layer_sizes": (32,), "max_iter": 250})
+        model.fit(T, q, dt=dt)
+        mean, lo, hi = model.predict_interval(T, coverage=0.9)
+        assert mean.shape == q.shape == lo.shape == hi.shape
+        assert np.all(lo <= mean) and np.all(mean <= hi)
+
+    def test_intervals_calibrated_with_aleatoric_noise(self):
+        # q has a large random component T cannot explain -> the interval must
+        # widen (via aleatoric variance) so coverage approaches the nominal 0.9,
+        # rather than collapsing to the tiny ensemble spread.
+        from icarus.pipeline.bandwise import BandwiseModalModel
+        from icarus.metrics.evaluation import interval_metrics
+        ny, nx, nt = 10, 11, 700
+        dt = 0.001
+        rng = np.random.default_rng(3)
+        yy, _ = np.meshgrid(np.linspace(0, 1, nx), np.linspace(0, 1, ny))
+        t = np.arange(nt) * dt
+        slow = np.sin(np.pi * yy)[:, :, None] * np.sin(2 * np.pi * 30 * t)
+        T = 420.0 + 3.0 * slow + 0.02 * rng.standard_normal((ny, nx, nt))
+        # heat flux: a predictable slow part + large irreducible scatter
+        q = (3.0e5 - 1.2e4 * (3.0 * slow)
+             + 3.0e3 * rng.standard_normal((ny, nx, nt)))
+        model = BandwiseModalModel(
+            edges=[150], n_pod_modes=3, n_members=3,
+            model_kwargs={"hidden_layer_sizes": (32,), "max_iter": 250})
+        model.fit(T, q, dt=dt)
+        _, lo, hi = model.predict_interval(T, coverage=0.9)
+        cov = interval_metrics(q, lo, hi)["coverage"]
+        assert 0.8 <= cov <= 0.98, f"coverage {cov:.3f} not near nominal 0.9"
+
+    def test_aleatoric_var_stored_per_band(self):
+        from icarus.pipeline.bandwise import BandwiseModalModel
+        T, q, dt = self._coupled_fields()
+        model = BandwiseModalModel(
+            edges=[150], n_pod_modes=3, n_members=3,
+            model_kwargs={"hidden_layer_sizes": (32,), "max_iter": 200})
+        model.fit(T, q, dt=dt)
+        for label in model.labels_:
+            assert model.bands_[label]["aleatoric_var"] >= 0.0
+
+    def test_predict_interval_requires_ensemble(self):
+        from icarus.pipeline.bandwise import BandwiseModalModel
+        T, q, dt = self._coupled_fields()
+        model = BandwiseModalModel(edges=[150], n_pod_modes=3, n_members=1,
+                                   model_kwargs={"hidden_layer_sizes": (16,),
+                                                 "max_iter": 100})
+        model.fit(T, q, dt=dt)
+        with pytest.raises(RuntimeError):
+            model.predict_interval(T)
+
+
+class TestBandwiseModalModel:
+    """Band-wise Model C: a separate POD modal T->q mapping per frequency band.
+    On data where each band has a clean linear T->q coupling, the model should
+    reconstruct heat flux well, and predict() must return the right shape."""
+
+    def _coupled_fields(self):
+        ny, nx, nt = 10, 11, 700
+        dt = 0.001                              # fs = 1000 Hz
+        rng = np.random.default_rng(1)
+        yy, xx = np.meshgrid(np.linspace(0, 1, nx), np.linspace(0, 1, ny))
+        t = np.arange(nt) * dt
+        p_slow = np.sin(np.pi * yy)[:, :, None]
+        p_fast = np.cos(np.pi * xx)[:, :, None]
+        slow = p_slow * np.sin(2 * np.pi * 30 * t)
+        fast = p_fast * np.sin(2 * np.pi * 300 * t)
+
+        T = 420.0 + 3.0 * slow + 2.0 * fast + 0.02 * rng.standard_normal((ny, nx, nt))
+        # Heat flux is a different LINEAR gain on each band's structure.
+        q = (3.0e5 - 1.2e4 * (3.0 * slow) + 0.6e4 * (2.0 * fast)
+             + 50.0 * rng.standard_normal((ny, nx, nt)))
+        return T, q, dt
+
+    def test_fit_predict_recovers_heat_flux(self):
+        from icarus.pipeline.bandwise import BandwiseModalModel
+        T, q, dt = self._coupled_fields()
+        model = BandwiseModalModel(
+            edges=[150], n_pod_modes=3,
+            model_kwargs={"hidden_layer_sizes": (32,), "max_iter": 300})
+        model.fit(T, q, dt=dt, verbose=False)
+
+        q_pred = model.predict(T)
+        assert q_pred.shape == q.shape
+
+        # Fluctuation-field R² across the whole field should be high.
+        from icarus.metrics.evaluation import evaluate
+        true_fluct = (q - q.mean(axis=2, keepdims=True)).reshape(-1)
+        pred_fluct = (q_pred - q_pred.mean(axis=2, keepdims=True)).reshape(-1)
+        m = evaluate(true_fluct, pred_fluct)
+        assert m.r2 > 0.9, f"expected good reconstruction, got R²={m.r2:.3f}"
+
+    def test_evaluate_reports_total_and_per_band(self):
+        from icarus.pipeline.bandwise import BandwiseModalModel
+        T, q, dt = self._coupled_fields()
+        model = BandwiseModalModel(
+            edges=[150], n_pod_modes=3,
+            model_kwargs={"hidden_layer_sizes": (32,), "max_iter": 300})
+        model.fit(T, q, dt=dt)
+        report = model.evaluate(verbose=False)
+        assert "total" in report
+        assert set(model.labels_).issubset(report.keys())
+        assert report["total"].r2 > 0.9
+
+    def test_predict_before_fit_raises(self):
+        from icarus.pipeline.bandwise import BandwiseModalModel
+        model = BandwiseModalModel(edges=[150])
+        with pytest.raises(RuntimeError):
+            model.predict(np.zeros((4, 4, 50)))
+
+    def test_top_level_export(self):
+        import icarus
+        assert hasattr(icarus, "BandwiseModalModel")
+
+
+class TestFrequencyPartition:
+    """Frequency partition of a field into additive band components — the
+    data-driven 'heat partition'. The defining property is additivity:
+    components must sum back to the mean-subtracted field."""
+
+    def _two_tone_field(self):
+        ny, nx, nt = 8, 9, 600
+        dt = 0.001                       # fs = 1000 Hz
+        yy, xx = np.meshgrid(np.linspace(0, 1, nx), np.linspace(0, 1, ny))
+        t = np.arange(nt) * dt
+        slow = np.sin(np.pi * yy)[:, :, None] * np.sin(2 * np.pi * 30 * t)
+        fast = np.cos(np.pi * xx)[:, :, None] * np.sin(2 * np.pi * 300 * t)
+        field = 5e5 + 4e4 * slow + 2e4 * fast       # mean + two tones
+        return field, dt
+
+    def test_components_sum_to_centred_field(self):
+        from icarus.features.partition import partition_by_frequency
+        field, dt = self._two_tone_field()
+        parts = partition_by_frequency(field, dt, edges=[150])
+        rebuilt = sum(parts.components.values())
+        centred = field - field.mean(axis=2, keepdims=True)
+        np.testing.assert_allclose(rebuilt, centred, atol=1e-6 * np.abs(centred).max())
+
+    def test_total_reconstructs_original(self):
+        from icarus.features.partition import partition_by_frequency
+        field, dt = self._two_tone_field()
+        parts = partition_by_frequency(field, dt, edges=[150])
+        np.testing.assert_allclose(parts.total(), field,
+                                   atol=1e-6 * np.abs(field).max())
+
+    def test_tones_separate_into_correct_bands(self):
+        from icarus.features.partition import partition_by_frequency
+        field, dt = self._two_tone_field()
+        parts = partition_by_frequency(field, dt, edges=[150])
+        energy = parts.energy()
+        labels = parts.labels
+        # 30 Hz tone -> low band, 300 Hz tone -> high band; each band dominated
+        # by one tone, so both bands carry substantial, comparable energy.
+        assert energy[labels[0]] > 0.4
+        assert energy[labels[1]] > 0.2
+        # The 30 Hz component must hold its energy below 150 Hz: check the low
+        # band has almost no power at the 300 Hz line.
+        low = parts.components[labels[0]].reshape(-1, field.shape[2])
+        spec = np.abs(np.fft.rfft(low, axis=1)).mean(axis=0)
+        freqs = np.fft.rfftfreq(field.shape[2], dt)
+        k300 = int(np.argmin(np.abs(freqs - 300)))
+        k30 = int(np.argmin(np.abs(freqs - 30)))
+        assert spec[k30] > 50 * spec[k300]
+
+    def test_n_components_and_labels(self):
+        from icarus.features.partition import partition_by_frequency
+        field, dt = self._two_tone_field()
+        parts = partition_by_frequency(field, dt, edges=[100, 500])
+        assert len(parts.components) == 3
+        assert parts.labels == ["0-100 Hz", "100-500 Hz", "500+ Hz"]
+
+    def test_bad_edges_raise(self):
+        from icarus.features.partition import partition_by_frequency
+        field, dt = self._two_tone_field()
+        with pytest.raises(ValueError):
+            partition_by_frequency(field, dt, edges=[500, 100])  # not ascending
+
+    def test_top_level_export(self):
+        import icarus
+        assert hasattr(icarus, "partition_by_frequency")
+
+
 class TestSpodHighLevelAPI:
     """The convenience API that makes SPOD usage read like the Quickstart:
     load_field -> SPOD().fit_field -> plot_spectrum / plot_mode."""
