@@ -4,7 +4,21 @@ All notable changes to this project are documented here.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/);
 versions follow [SemVer](https://semver.org/).
 
-## [0.5.0] — 2026-06-17
+## [0.6.0] — 2026-06-30
+
+### Added
+- **Automatic band selection**: `SPOD.suggest_band_edges(n_bands)` places each
+  band boundary at the energy valley between adjacent dominant spectral peaks;
+  `BandwiseModalModel(edges="auto", n_bands=N)` runs SPOD on the heat flux
+  during `fit` and picks its own edges — band boundaries become a property of
+  the data rather than a manual choice.
+
+### Notes
+- The selector keys on spectral coherence, so known instrumentation tones
+  (e.g. fixed fractions of the frame rate) can dominate edge placement —
+  identify and exclude/notch them first.
+
+## [0.5.0] — 2026-06-17 (not published to PyPI; included in 0.6.0)
 
 Timescale-resolved, uncertainty-aware heat-flux prediction.
 

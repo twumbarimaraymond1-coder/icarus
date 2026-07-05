@@ -44,7 +44,7 @@ from icarus.models.neural import HeatFluxNet, SEARCH_SPACES
 from icarus.models.probabilistic import ProbabilisticHeatFluxNet
 from icarus.metrics.evaluation import evaluate, interval_metrics
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 __author__ = "Raymond Twum-Barima"
 
 __all__ = [

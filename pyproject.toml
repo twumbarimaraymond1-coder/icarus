@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "icarus-thermal"
-version = "0.5.0"
+version = "0.6.0"
 description = "Icarus: data-driven heat flux prediction from infrared thermography using POD, DMD, and machine learning"
 readme = "README.md"
 license = { text = "MIT" }
