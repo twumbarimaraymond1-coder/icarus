@@ -41,9 +41,14 @@ class BandwiseModalModel:
 
     Parameters
     ----------
-    edges : list[float]
+    edges : list[float] or "auto"
         Interior frequency band boundaries in Hz (e.g. ``[200, 1000]`` -> three
-        bands). Choose them from an SPOD energy spectrum.
+        bands). Pass ``"auto"`` to derive them from the data during ``fit``:
+        SPOD is run on the heat flux and each edge is placed at the energy
+        valley between adjacent spectral peaks
+        (:meth:`SPOD.suggest_band_edges`).
+    n_bands : int
+        Number of bands when ``edges="auto"`` (ignored otherwise).
     n_pod_modes : int
         POD modes retained per band, per field.
     model_kwargs : dict, optional
@@ -72,7 +77,8 @@ class BandwiseModalModel:
 
     def __init__(
         self,
-        edges: list[float],
+        edges,
+        n_bands: int = 3,
         n_pod_modes: int = 5,
         model_kwargs: Optional[dict] = None,
         optimise_hyperparams: bool = False,
@@ -82,6 +88,7 @@ class BandwiseModalModel:
         random_state: int = 42,
     ):
         self.edges = edges
+        self.n_bands = n_bands
         self.n_pod_modes = n_pod_modes
         self.model_kwargs = model_kwargs or {"hidden_layer_sizes": (64,)}
         self.optimise_hyperparams = optimise_hyperparams
@@ -130,6 +137,11 @@ class BandwiseModalModel:
         self._ny, self._nx, _ = T.shape
         self.dt_ = float(dt)
         self._T_train, self._q_train = T, q
+
+        if isinstance(self.edges, str):
+            if self.edges != "auto":
+                raise ValueError(f"edges must be a list or 'auto', got {self.edges!r}.")
+            self.edges = self._auto_edges(q, dt, verbose=verbose)
 
         T_parts = partition_by_frequency(T, dt, self.edges)
         q_parts = partition_by_frequency(q, dt, self.edges)
@@ -241,6 +253,19 @@ class BandwiseModalModel:
         return results
 
     # ── per-band helpers ──────────────────────────────────────────────────────
+
+    def _auto_edges(self, q: np.ndarray, dt: float, verbose: bool) -> list[float]:
+        """Choose band edges from the heat flux's SPOD spectrum (valleys
+        between the ``n_bands`` strongest coherent peaks)."""
+        from icarus.decomposition.spod import SPOD
+
+        nt = q.shape[2]
+        block = max(64, min(1024, nt // 2))
+        spod = SPOD(n_modes=2, block_size=block).fit(self._centre_matrix(q), dt=dt)
+        edges = spod.suggest_band_edges(n_bands=self.n_bands)
+        if verbose:
+            print(f"[bandwise] auto edges from SPOD: {edges} Hz")
+        return edges
 
     def _fit_band(self, T_band: np.ndarray, q_band: np.ndarray) -> dict:
         X_c_T = self._centre_matrix(T_band)

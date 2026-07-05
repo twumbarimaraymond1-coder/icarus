@@ -273,6 +273,45 @@ class SPOD:
         idx = idx[np.argsort(e[idx])[::-1][:n]]
         return self.frequencies_[idx]
 
+    def suggest_band_edges(self, n_bands: int = 3, mode: int = 0) -> list[float]:
+        """Data-driven frequency band boundaries for partitioning.
+
+        Finds the ``n_bands`` strongest spectral peaks (the dominant coherent
+        timescales) and places each boundary at the **energy minimum between
+        adjacent peaks** — the natural valley, so no coherent structure is
+        split across two bands. Use with
+        :func:`icarus.features.partition.partition_by_frequency` or
+        ``BandwiseModalModel(edges="auto")``.
+
+        Parameters
+        ----------
+        n_bands : int
+            Number of bands wanted (returns ``n_bands - 1`` edges).
+        mode : int
+            Mode rank whose spectrum is used (0 = leading).
+
+        Returns
+        -------
+        list[float]
+            Ascending interior band edges in Hz.
+        """
+        self._require_fit()
+        if n_bands < 2:
+            return []
+        peaks = np.sort(self.dominant_frequencies(n=n_bands, mode=mode))
+        e = self.eigenvalues_[:, mode]
+        freqs = self.frequencies_
+
+        edges: list[float] = []
+        for lo, hi in zip(peaks[:-1], peaks[1:]):
+            between = (freqs > lo) & (freqs < hi)
+            if not between.any():        # adjacent bins — split midway
+                edges.append(float((lo + hi) / 2))
+                continue
+            idx = np.where(between)[0]
+            edges.append(float(freqs[idx[np.argmin(e[idx])]]))
+        return sorted(edges)
+
     # ── plotting ────────────────────────────────────────────────────────────
 
     def plot_spectrum(

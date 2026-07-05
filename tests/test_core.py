@@ -282,6 +282,26 @@ class TestSPOD:
         # Strongest first (f1 has the larger amplitude in the fixture).
         assert abs(tones[0] - d["f1"]) < df
 
+    def test_suggest_band_edges_separates_tones(self, two_tone_data):
+        # Two coherent tones -> the suggested edge must fall strictly between
+        # them, in the low-energy valley, so each tone lands in its own band.
+        d = two_tone_data
+        spod = SPOD(n_modes=2, block_size=d["block"]).fit(d["X_c"], dt=d["dt"])
+        edges = spod.suggest_band_edges(n_bands=2)
+        assert len(edges) == 1
+        assert d["f1"] < edges[0] < d["f2"]
+
+    def test_suggest_band_edges_ascending_and_positive(self, two_tone_data):
+        d = two_tone_data
+        spod = SPOD(n_modes=2, block_size=d["block"]).fit(d["X_c"], dt=d["dt"])
+        edges = spod.suggest_band_edges(n_bands=2)
+        assert all(e > 0 for e in edges)
+        assert edges == sorted(edges)
+
+    def test_suggest_band_edges_requires_fit(self):
+        with pytest.raises(RuntimeError):
+            SPOD().suggest_band_edges()
+
     def test_block_size_larger_than_nt_raises(self):
         spod = SPOD(block_size=64)
         with pytest.raises(ValueError):
@@ -461,6 +481,20 @@ class TestBandwiseModalModel:
         model = BandwiseModalModel(edges=[150])
         with pytest.raises(RuntimeError):
             model.predict(np.zeros((4, 4, 50)))
+
+    def test_auto_edges_from_spod(self):
+        # edges="auto": the model runs SPOD on the heat flux during fit and
+        # picks its own band boundaries; with two injected tones the chosen
+        # edge must separate them and the model must still fit and predict.
+        from icarus.pipeline.bandwise import BandwiseModalModel
+        T, q, dt = self._coupled_fields()
+        model = BandwiseModalModel(
+            edges="auto", n_bands=2, n_pod_modes=3,
+            model_kwargs={"hidden_layer_sizes": (32,), "max_iter": 200})
+        model.fit(T, q, dt=dt)
+        assert len(model.edges) == 1
+        assert 30 < model.edges[0] < 300
+        assert model.predict(T).shape == q.shape
 
     def test_top_level_export(self):
         import icarus
