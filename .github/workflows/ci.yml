@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [ main ]
 
+# Force UTF-8 stdout so non-ASCII output (e.g. "R²", "W/m²") doesn't raise
+# UnicodeEncodeError on runners whose default locale is not UTF-8.
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: "utf-8"
+
 jobs:
   lint:
     name: Lint (ruff)
@@ -16,7 +22,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
 
       - run: pip install ruff
@@ -31,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
       - name: Checkout repository
@@ -58,7 +64,7 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
 
       - run: pip install -e ".[dev]"
