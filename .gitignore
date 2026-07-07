@@ -11,7 +11,7 @@ build/
 spod_out*/
 spod_b*/
 spod_sweep_*/
-models/
+/models/
 
 # Virtual environments
 .venv/
