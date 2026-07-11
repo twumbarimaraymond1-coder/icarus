@@ -37,6 +37,17 @@ The package name on install is `icarus-thermal`; the import name is `icarus`.
 
 ---
 
+## Tutorials
+
+Three runnable notebooks (fully self-contained — synthetic data, no
+experimental files needed) in [`notebooks/`](notebooks/):
+
+1. [Quickstart: temperature → heat flux in a few lines](notebooks/01_quickstart.ipynb)
+2. [Spectral POD: separating structures by timescale](notebooks/02_spectral_pod.ipynb)
+3. [Timescale-resolved prediction with calibrated uncertainty](notebooks/03_bandwise_uncertainty.ipynb)
+
+---
+
 ## Quickstart
 
 ```python
