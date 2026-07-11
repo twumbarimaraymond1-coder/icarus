@@ -140,7 +140,9 @@ A runnable end-to-end script is provided in
 
 Where POD ranks modes by energy alone, **SPOD** produces modes coherent at a
 single frequency — separating boiling structures by timescale (nucleation,
-bubble departure, microlayer). The high-level API mirrors the Quickstart:
+bubble departure, microlayer). The implementation follows Towne, Schmidt &
+Colonius (2018) (see *References* below). The high-level API mirrors the
+Quickstart:
 
 ```python
 import icarus as tf
@@ -329,6 +331,24 @@ in this repository**; they may be available from the authors / Loughborough
 University on reasonable request. All code paths can be exercised without
 them: `examples/quickstart.py` and `examples/cross_dataset_eval.py` generate
 synthetic data, and the test suite (`pytest tests/`) is fully self-contained.
+
+---
+
+## References
+
+Methods implemented in this package build on:
+
+- **SPOD** — Towne, A., Schmidt, O. T. & Colonius, T. (2018). Spectral proper
+  orthogonal decomposition and its relationship to dynamic mode decomposition
+  and resolvent analysis. *Journal of Fluid Mechanics*, 847, 821–867.
+  [arXiv:1708.04393](https://arxiv.org/abs/1708.04393). Spectral POD
+  originates with Lumley (1970), *Stochastic Tools in Turbulence*.
+- **Deep-ensemble uncertainty** — Lakshminarayanan, B., Pritzel, A. &
+  Blundell, C. (2017). Simple and scalable predictive uncertainty estimation
+  using deep ensembles. *Advances in Neural Information Processing Systems 30*.
+- **POD / DMD** — Berkooz, Holmes & Lumley (1993), *Annu. Rev. Fluid Mech.*
+  25, 539–575; Schmid, P. J. (2010). Dynamic mode decomposition of numerical
+  and experimental data. *Journal of Fluid Mechanics*, 656, 5–28.
 
 ---
 
